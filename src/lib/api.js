@@ -55,6 +55,29 @@ export async function redeemPoints(item, amount) {
   return data;
 }
 
+// 최초 접속 시 학년/이름/성별을 구글 시트에 등록한다.
+export async function registerUser(grade, name, gender) {
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    redirect: 'follow',
+    body: JSON.stringify({
+      type: 'REGISTER_USER',
+      grade: Math.round(Number(grade)),
+      name,
+      gender,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error('사용자 등록에 실패했습니다.');
+  }
+  const data = await res.json().catch(() => ({}));
+  if (data?.success === false) {
+    throw new Error(data.message || '사용자 등록에 실패했습니다.');
+  }
+  return data;
+}
+
 // 구글 시트가 반환하는 "drive.google.com/uc?export=view&id=..." 형태의 링크는
 // 최종 리소스에 Cross-Origin-Resource-Policy: same-site 헤더가 붙어 있어
 // 다른 도메인(Vercel 배포 주소 등)의 <img> 태그에서는 브라우저가 차단한다.

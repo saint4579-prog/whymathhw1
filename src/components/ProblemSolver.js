@@ -1,58 +1,20 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Canvas from './Canvas';
 import { toViewableImageUrl } from '@/lib/api';
 import { copyHintPrompt } from '@/lib/geminiPrompt';
 
-const DRAFT_PREFIX = 'problem-canvas-draft:';
 const LAYOUT_MODE_KEY = 'problem-solver-layout-mode';
-const inMemoryDrafts = new Map();
-
-function getProblemKey(problem) {
-  const id = problem?.rowNumber ?? problem?.code;
-  return id == null ? null : String(id);
-}
-
-function readDraft(key) {
-  if (!key) return null;
-  const memoryDraft = inMemoryDrafts.get(key);
-  if (memoryDraft) return memoryDraft;
-  try {
-    const storedDraft = window.sessionStorage.getItem(`${DRAFT_PREFIX}${key}`);
-    if (storedDraft) inMemoryDrafts.set(key, storedDraft);
-    return storedDraft;
-  } catch {
-    return null;
-  }
-}
-
-function writeDraft(key, dataURL) {
-  if (!key) return;
-  if (!dataURL) {
-    removeDraft(key);
-    return;
-  }
-  inMemoryDrafts.set(key, dataURL);
-  try {
-    window.sessionStorage.setItem(`${DRAFT_PREFIX}${key}`, dataURL);
-  } catch {
-    // sessionStorage 용량을 넘겨도 현재 탭에서는 메모리 사본으로 계속 보존한다.
-  }
-}
-
-function removeDraft(key) {
-  if (!key) return;
-  inMemoryDrafts.delete(key);
-  try {
-    window.sessionStorage.removeItem(`${DRAFT_PREFIX}${key}`);
-  } catch {
-    // 저장소 접근이 막힌 브라우저에서도 메모리 사본 삭제는 이미 완료되었다.
-  }
-}
+const PHASE = { SOLVING: 'SOLVING', GRADING: 'GRADING' };
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function formatMinSec(totalSec) {
+  const sec = Math.max(0, Math.floor(totalSec));
+  return `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
 }
 
 function ImageLightbox({ imageUrl, alt, onClose }) {
@@ -201,13 +163,49 @@ function ImageLightbox({ imageUrl, alt, onClose }) {
   );
 }
 
+function CelebrationModal({ onClose }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label="채점 완료"
+    >
+      <div className="w-full max-w-sm rounded-[2rem] border-4 border-white bg-gradient-to-b from-amber-50 to-rose-50 p-6 text-center shadow-2xl">
+        <p className="text-6xl">🎉🐶🦴</p>
+        <h2 className="mt-3 text-xl font-extrabold text-stone-700">오늘 채점 끝! 정말 잘했어요!</h2>
+        <p className="mt-2 text-sm font-semibold text-stone-500">멍멍이가 오늘도 열심히 도와줬어요 🐾</p>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-6 w-full rounded-2xl bg-rose-400 py-3 font-extrabold text-white shadow-lg shadow-rose-200 hover:bg-rose-500"
+        >
+          대시보드로 돌아가기 🏠
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // queue: 현재 풀이 세션에서 순회할 문제 배열
 // queueLabel: 화면 상단에 표시할 현재 세션 이름
-export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLabel }) {
+// onFinish: 채점(GRADING) 단계에서 마지막 문제까지 채점을 마쳤을 때 호출 (대시보드로 복귀)
+//
+// 학습은 두 단계(phase)로 진행된다.
+// 1) SOLVING: 문제를 차례로 풀며 캔버스 그림을 problem.code를 키로 삼아 savedDrawings에 임시 저장한다.
+//    O/X 채점 버튼은 숨기고, 대신 [다음 문제]/[채점 시작하기] 버튼만 노출한다.
+// 2) GRADING: 처음 문제로 돌아가 savedDrawings에 저장해둔 손글씨를 읽기 전용 캔버스로 보여주며 O/X로 채점한다.
+export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLabel, onFinish }) {
   const canvasRef = useRef(null);
   const splitContainerRef = useRef(null);
-  const activeDraftKeyRef = useRef(null);
-  const timerStartedAtRef = useRef(Date.now());
+  const activeKeyRef = useRef(null);
+  const activePhaseRef = useRef(PHASE.SOLVING);
+  const solveStartRef = useRef(Date.now());
+  const savedDrawingsRef = useRef({});
+  const solveTimesRef = useRef({});
+
+  const [phase, setPhase] = useState(PHASE.SOLVING);
+  const [, forceSavedDrawingsUpdate] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [elapsedTimeSec, setElapsedTimeSec] = useState(0);
   const [copyingHint, setCopyingHint] = useState(false);
@@ -216,18 +214,35 @@ export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLa
   const [isDraggingSplitter, setIsDraggingSplitter] = useState(false);
   const [imageFitMode, setImageFitMode] = useState('contain');
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
-  const problem = queue[index];
-  const problemKey = getProblemKey(problem);
-  const viewableImageUrl = toViewableImageUrl(problem?.imageUrl);
+  const [isCelebrationOpen, setIsCelebrationOpen] = useState(false);
 
+  const problem = queue[index];
+  const problemKey = problem?.code ?? null;
+  const viewableImageUrl = toViewableImageUrl(problem?.imageUrl);
+  const isSolving = phase === PHASE.SOLVING;
+  const isLastInQueue = index >= queue.length - 1;
+
+  const setSavedDrawing = (key, dataURL) => {
+    if (!key) return;
+    savedDrawingsRef.current = { ...savedDrawingsRef.current, [key]: dataURL };
+    forceSavedDrawingsUpdate((n) => n + 1);
+  };
+
+  const setSolveTime = (key, seconds) => {
+    if (!key) return;
+    solveTimesRef.current = { ...solveTimesRef.current, [key]: seconds };
+  };
+
+  // SOLVING 단계에서만 문제별 풀이 시간을 잰다. GRADING에서는 저장해둔 시간을 그대로 사용한다.
   useEffect(() => {
-    timerStartedAtRef.current = Date.now();
+    if (phase !== PHASE.SOLVING) return undefined;
+    solveStartRef.current = Date.now();
     setElapsedTimeSec(0);
     const timerId = window.setInterval(() => {
-      setElapsedTimeSec(Math.floor((Date.now() - timerStartedAtRef.current) / 1000));
+      setElapsedTimeSec(Math.floor((Date.now() - solveStartRef.current) / 1000));
     }, 1000);
     return () => window.clearInterval(timerId);
-  }, [problemKey]);
+  }, [problemKey, phase]);
 
   useEffect(() => {
     const savedMode = window.localStorage.getItem(LAYOUT_MODE_KEY);
@@ -236,59 +251,66 @@ export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLa
     }
   }, []);
 
-  const saveCanvasForKey = useCallback((key) => {
-    if (!key) return;
-    writeDraft(key, canvasRef.current?.getDataURL() ?? null);
-  }, []);
-
-  // 문제 전환 직전의 그림을 저장하고, 전환된 문제의 그림을 첫 페인트 전에 복원한다.
+  // 문제/단계 전환 직전(SOLVING이었을 때만) 캔버스와 풀이 시간을 저장하고,
+  // 전환된 문제의 저장된 그림을 복원한다. (GRADING에서는 읽기 전용으로 그대로 복원)
   useLayoutEffect(() => {
-    const previousKey = activeDraftKeyRef.current;
-    if (previousKey && previousKey !== problemKey) saveCanvasForKey(previousKey);
-    activeDraftKeyRef.current = problemKey;
-    canvasRef.current?.restore(readDraft(problemKey));
-  }, [problemKey, saveCanvasForKey]);
+    const previousKey = activeKeyRef.current;
+    const previousPhase = activePhaseRef.current;
+    const wasSolving = previousPhase === PHASE.SOLVING;
+    const transitioned = previousKey !== problemKey || previousPhase !== phase;
 
-  useEffect(
-    () => () => {
-      saveCanvasForKey(activeDraftKeyRef.current);
-    },
-    [saveCanvasForKey]
-  );
+    if (wasSolving && transitioned && previousKey) {
+      const dataURL = canvasRef.current?.getDataURL() ?? null;
+      setSavedDrawing(previousKey, dataURL);
+      const timeSec = Math.max(1, Math.floor((Date.now() - solveStartRef.current) / 1000));
+      setSolveTime(previousKey, timeSec);
+    }
 
-  const navigateTo = (nextIndex) => {
-    if (submitting || nextIndex === index || nextIndex < 0 || nextIndex >= queue.length) return;
-    saveCanvasForKey(problemKey);
-    setIndex(nextIndex);
+    activeKeyRef.current = problemKey;
+    activePhaseRef.current = phase;
+
+    const sourceDataURL = problemKey ? savedDrawingsRef.current[problemKey] ?? null : null;
+    canvasRef.current?.restore(sourceDataURL);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [problemKey, phase]);
+
+  const goToNext = () => {
+    if (submitting) return;
+    if (isSolving && isLastInQueue) {
+      // 오늘 목표량을 다 풀었으니 채점 모드로 전환하고 처음 문제로 되돌아간다.
+      setPhase(PHASE.GRADING);
+      setIndex(0);
+      return;
+    }
+    if (index + 1 < queue.length) setIndex(index + 1);
   };
 
-  const goToNext = () => navigateTo(index + 1);
-  const goToPrev = () => navigateTo(index - 1);
+  const goToPrev = () => {
+    if (submitting || index === 0) return;
+    setIndex(index - 1);
+  };
 
   const handleGrade = async (isCorrect) => {
     if (!problem || submitting) return;
-    const canvasDataURL = canvasRef.current?.getDataURL() ?? null;
-    const solveTimeSec = Math.max(
-      1,
-      Math.floor((Date.now() - timerStartedAtRef.current) / 1000)
-    );
+    const canvasImage = problemKey ? savedDrawingsRef.current[problemKey] ?? null : null;
+    const solveTimeSec = problemKey ? solveTimesRef.current[problemKey] ?? 1 : 1;
     setSubmitting(true);
     try {
-      await onGrade(problem, isCorrect, canvasDataURL, solveTimeSec);
-      canvasRef.current?.clear();
-      removeDraft(problemKey);
-      if (index + 1 < queue.length) setIndex(index + 1);
+      await onGrade(problem, isCorrect, canvasImage, solveTimeSec);
+      if (isLastInQueue) {
+        setIsCelebrationOpen(true);
+      } else {
+        setIndex(index + 1);
+      }
     } catch (error) {
-      writeDraft(problemKey, canvasDataURL);
       alert(error.message || '채점 결과 전송에 실패했습니다.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleClear = () => {
+  const handleResetCanvas = () => {
     canvasRef.current?.clear();
-    removeDraft(problemKey);
   };
 
   const handleHint = async () => {
@@ -306,7 +328,6 @@ export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLa
 
   const toggleLayoutMode = () => {
     const nextMode = layoutMode === 'horizontal' ? 'vertical' : 'horizontal';
-    saveCanvasForKey(problemKey);
     setLayoutMode(nextMode);
     window.localStorage.setItem(LAYOUT_MODE_KEY, nextMode);
     window.requestAnimationFrame(() => canvasRef.current?.resize());
@@ -345,6 +366,12 @@ export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLa
 
   return (
     <div className="mx-auto max-w-7xl">
+      {!isSolving && (
+        <div className="mb-3 rounded-2xl bg-sky-100 px-4 py-3 text-center text-sm font-extrabold text-sky-700">
+          💯 채점 시간이에요! 멍멍이와 함께 확인해봐요
+        </div>
+      )}
+
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-semibold text-stone-500">
           {queueLabel && (
@@ -353,10 +380,15 @@ export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLa
             </span>
           )}
           {index + 1} / {queue.length} · {problem.code}
-          <span className="ml-2 inline-block rounded-full bg-sky-100 px-3 py-1 text-xs font-extrabold text-sky-600">
-            ⏱️ {String(Math.floor(elapsedTimeSec / 60)).padStart(2, '0')}:
-            {String(elapsedTimeSec % 60).padStart(2, '0')}
-          </span>
+          {isSolving ? (
+            <span className="ml-2 inline-block rounded-full bg-sky-100 px-3 py-1 text-xs font-extrabold text-sky-600">
+              ⏱️ {formatMinSec(elapsedTimeSec)}
+            </span>
+          ) : (
+            <span className="ml-2 inline-block rounded-full bg-amber-100 px-3 py-1 text-xs font-extrabold text-amber-700">
+              ⏱️ 풀이시간 {formatMinSec(solveTimesRef.current[problemKey] ?? 0)}
+            </span>
+          )}
         </p>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <button
@@ -377,7 +409,7 @@ export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLa
           <button
             type="button"
             onClick={goToNext}
-            disabled={index >= queue.length - 1 || submitting}
+            disabled={(!isSolving && index >= queue.length - 1) || submitting}
             className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-amber-600 shadow-sm disabled:opacity-40"
           >
             다음 ➡
@@ -483,33 +515,48 @@ export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLa
           }`}
         >
           <div className="relative min-h-[260px] flex-1">
-            <Canvas ref={canvasRef} disabled={isDraggingSplitter || submitting} />
-            <button
-              type="button"
-              onClick={handleClear}
-              disabled={submitting}
-              className="absolute right-2 top-2 rounded-full border-2 border-rose-100 bg-white/90 px-3 py-1.5 text-xs font-bold text-stone-500 shadow-sm hover:bg-rose-50 disabled:opacity-40"
-            >
-              🧹 지우개(전체 삭제)
-            </button>
+            <Canvas ref={canvasRef} disabled={!isSolving || isDraggingSplitter || submitting} />
+            {isSolving && (
+              <button
+                type="button"
+                onClick={handleResetCanvas}
+                disabled={submitting}
+                className="absolute right-2 top-2 rounded-full border-2 border-rose-100 bg-white/90 px-3 py-1.5 text-xs font-bold text-stone-500 shadow-sm hover:bg-rose-50 disabled:opacity-40"
+              >
+                🗑️ 다시 풀기 (초기화)
+              </button>
+            )}
           </div>
-          <div className="grid min-h-24 shrink-0 grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => handleGrade('O')}
-              disabled={submitting}
-              className="rounded-3xl bg-rose-400 px-2 text-lg font-extrabold text-white shadow-lg shadow-rose-200 hover:bg-rose-500 disabled:cursor-wait disabled:opacity-60 md:text-2xl"
-            >
-              {submitting ? '🐾 멍멍이가 드라이브에 풀이를 보관 중이에요...' : '최고예요! 🐶 (O)'}
-            </button>
-            <button
-              type="button"
-              onClick={() => handleGrade('X')}
-              disabled={submitting}
-              className="rounded-3xl bg-orange-400 px-2 text-lg font-extrabold text-white shadow-lg shadow-amber-200 hover:bg-orange-500 disabled:cursor-wait disabled:opacity-60 md:text-2xl"
-            >
-              {submitting ? '🐾 멍멍이가 드라이브에 풀이를 보관 중이에요...' : '다시 도전! 🦴 (X)'}
-            </button>
+          <div className="min-h-24 shrink-0">
+            {isSolving ? (
+              <button
+                type="button"
+                onClick={goToNext}
+                disabled={submitting}
+                className="h-full w-full rounded-3xl bg-gradient-to-r from-rose-400 to-amber-400 px-2 text-lg font-extrabold text-white shadow-lg shadow-rose-200 hover:from-rose-500 hover:to-amber-500 disabled:cursor-wait disabled:opacity-60 md:text-2xl"
+              >
+                {isLastInQueue ? '🎉 다 풀었어요! 채점 시작하기' : '다음 문제 ➡️'}
+              </button>
+            ) : (
+              <div className="grid h-full grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => handleGrade('O')}
+                  disabled={submitting}
+                  className="rounded-3xl bg-rose-400 px-2 text-lg font-extrabold text-white shadow-lg shadow-rose-200 hover:bg-rose-500 disabled:cursor-wait disabled:opacity-60 md:text-2xl"
+                >
+                  {submitting ? '🐾 멍멍이가 드라이브에 풀이를 보관 중이에요...' : '최고예요! 🐶 (O)'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleGrade('X')}
+                  disabled={submitting}
+                  className="rounded-3xl bg-orange-400 px-2 text-lg font-extrabold text-white shadow-lg shadow-amber-200 hover:bg-orange-500 disabled:cursor-wait disabled:opacity-60 md:text-2xl"
+                >
+                  {submitting ? '🐾 멍멍이가 드라이브에 풀이를 보관 중이에요...' : '다시 도전! 🦴 (X)'}
+                </button>
+              </div>
+            )}
           </div>
         </section>
       </div>
@@ -519,6 +566,15 @@ export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLa
           imageUrl={viewableImageUrl}
           alt={problem.code}
           onClose={() => setIsLightboxOpen(false)}
+        />
+      )}
+
+      {isCelebrationOpen && (
+        <CelebrationModal
+          onClose={() => {
+            setIsCelebrationOpen(false);
+            onFinish?.();
+          }}
         />
       )}
     </div>

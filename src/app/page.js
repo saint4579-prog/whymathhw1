@@ -8,13 +8,15 @@ import ReviewMode from '@/components/ReviewMode';
 import ProblemSolver from '@/components/ProblemSolver';
 import MonthlyPlanner from '@/components/MonthlyPlanner';
 import RewardStore from '@/components/RewardStore';
-import { fetchProblems, redeemPoints, submitGrade } from '@/lib/api';
+import UserRegistration from '@/components/UserRegistration';
+import { fetchProblems, redeemPoints, registerUser, submitGrade } from '@/lib/api';
 import { sortProblemsByPage } from '@/lib/problemUtils';
 import { recordAttempt } from '@/lib/reviewSchedule';
 
 const STUDY_RECORDS_KEY = 'dog-math-study-records';
 const POINT_HISTORY_KEY = 'dog-math-point-history';
 const CURRENT_POINTS_KEY = 'dog-math-current-points';
+const USER_INFO_KEY = 'userInfo';
 
 function readLocalArray(key) {
   try {
@@ -82,6 +84,8 @@ function getPointDelta(entry) {
 }
 
 export default function Home() {
+  // undefined: 아직 localStorage 확인 전, null: 미등록(등록 화면 노출), object: 등록 완료
+  const [userInfo, setUserInfo] = useState(undefined);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [problems, setProblems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -89,6 +93,10 @@ export default function Home() {
   const [studyRecords, setStudyRecords] = useState([]);
   const [pointHistory, setPointHistory] = useState([]);
   const [currentPoints, setCurrentPoints] = useState(0);
+  // 보상 상점 화면용 원본 데이터: 백엔드가 실제로 내려주는 필드는
+  // dailyStats(날짜별 학습 통계)와 pointLogs(엄마가 차감한 내역)이다.
+  const [dailyStats, setDailyStats] = useState({});
+  const [pointLogs, setPointLogs] = useState([]);
 
   // 현재 풀이 세션(문제풀기 탭)에서 순회할 문제 목록과 인덱스.
   // 어느 탭에서 [풀기]를 눌렀는지에 따라 전체 목록/오답노트/망각곡선 복습/오늘의 학습 목표 중 하나가 들어간다.
@@ -133,6 +141,12 @@ export default function Home() {
       setStudyRecords(mergedStudyRecords);
       setPointHistory(mergedPointHistory);
       setCurrentPoints(loadedPoints);
+      setDailyStats(
+        root?.dailyStats && typeof root.dailyStats === 'object' && !Array.isArray(root.dailyStats)
+          ? root.dailyStats
+          : {}
+      );
+      setPointLogs(Array.isArray(root?.pointLogs) ? root.pointLogs : []);
       writeLocalValue(STUDY_RECORDS_KEY, mergedStudyRecords);
       writeLocalValue(POINT_HISTORY_KEY, mergedPointHistory);
       window.localStorage.setItem(CURRENT_POINTS_KEY, String(loadedPoints));
@@ -143,9 +157,35 @@ export default function Home() {
     }
   }, []);
 
+  // 최초 접속 시 1회만 사용자 등록을 받는다: localStorage에 userInfo가 있으면 바로 메인 화면으로 진입한다.
   useEffect(() => {
-    loadProblems();
-  }, [loadProblems]);
+    try {
+      const raw = window.localStorage.getItem(USER_INFO_KEY);
+      setUserInfo(raw ? JSON.parse(raw) : null);
+    } catch {
+      setUserInfo(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (userInfo) loadProblems();
+  }, [loadProblems, userInfo]);
+
+  const handleRegisterUser = async ({ grade, name, gender }) => {
+    const response = await registerUser(grade, name, gender);
+    const responseRoot = getPayloadRoot(response);
+    const data = {
+      grade,
+      name,
+      gender,
+      registeredAt: new Date().toISOString(),
+      ...(responseRoot && typeof responseRoot === 'object' && !Array.isArray(responseRoot)
+        ? responseRoot
+        : {}),
+    };
+    window.localStorage.setItem(USER_INFO_KEY, JSON.stringify(data));
+    setUserInfo(data);
+  };
 
   const startSolving = (list, rowNumber, label) => {
     const startIndex = rowNumber == null ? 0 : Math.max(list.findIndex((p) => p.rowNumber === rowNumber), 0);
@@ -325,6 +365,14 @@ export default function Home() {
     return response;
   };
 
+  // 등록 여부 확인 전에는 아무것도 그리지 않아 깜빡임을 막는다.
+  if (userInfo === undefined) return null;
+
+  // userInfo가 없으면(미등록) 메인 앱을 숨기고 등록 화면만 전체 화면으로 보여준다.
+  if (userInfo === null) {
+    return <UserRegistration onSubmit={handleRegisterUser} />;
+  }
+
   return (
     <main className="min-h-screen bg-gradient-to-b from-amber-50 via-rose-50/40 to-amber-50 pb-10">
       <Header
@@ -375,6 +423,7 @@ export default function Home() {
             setIndex={setSolverIndex}
             onGrade={handleGrade}
             queueLabel={solverLabel}
+            onFinish={() => setActiveTab('dashboard')}
           />
         )}
         {!loading && !error && activeTab === 'planner' && (
@@ -383,7 +432,8 @@ export default function Home() {
         {!loading && !error && activeTab === 'store' && (
           <RewardStore
             currentPoints={currentPoints}
-            pointHistory={pointHistory}
+            dailyStats={dailyStats}
+            pointLogs={pointLogs}
             onRedeem={handleRedeemPoints}
           />
         )}

@@ -4,25 +4,22 @@ import { useMemo, useState } from 'react';
 
 const DEFAULT_PARENT_PIN = '1234';
 
-function getHistoryAmount(entry) {
-  const amount = Number(entry.amount ?? entry.points ?? entry.point ?? 0) || 0;
-  const type = String(entry.type ?? entry.action ?? '').toUpperCase();
-  if (type.includes('REDEEM') || type.includes('USE') || type.includes('SPEND')) {
-    return -Math.abs(amount);
-  }
-  return amount;
+// dailyStats의 날짜 키는 "Thu Jul 23"처럼 연도가 빠진 형태로 내려오므로,
+// 화면/정렬용 "YYYY-MM-DD"로 바꿀 때는 현재 연도를 붙여서 파싱한다.
+function toISODate(value) {
+  if (!value) return null;
+  const hasYear = /\d{4}/.test(String(value));
+  const date = new Date(hasYear ? value : `${value} ${new Date().getFullYear()}`);
+  if (Number.isNaN(date.getTime())) return null;
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 function formatDate(value) {
-  if (!value) return '-';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value).slice(0, 16);
-  return new Intl.DateTimeFormat('ko-KR', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
+  const iso = toISODate(value);
+  return iso ?? (value ? String(value).slice(0, 16) : '-');
 }
 
 function ParentRewardModal({ currentPoints, onClose, onRedeem }) {
@@ -170,21 +167,52 @@ function ParentRewardModal({ currentPoints, onClose, onRedeem }) {
   );
 }
 
-export default function RewardStore({ currentPoints = 0, pointHistory = [], onRedeem }) {
+export default function RewardStore({ currentPoints = 0, dailyStats = {}, pointLogs = [], onRedeem }) {
   const [isParentModalOpen, setIsParentModalOpen] = useState(false);
-  const stats = useMemo(
+
+  // 그동안 모은 포인트: dailyStats(날짜별 학습 통계)의 pointsEarned를 모두 합산한다.
+  const totalEarned = useMemo(
     () =>
-      pointHistory.reduce(
-        (result, entry) => {
-          const amount = getHistoryAmount(entry);
-          if (amount >= 0) result.earned += amount;
-          else result.used += Math.abs(amount);
-          return result;
-        },
-        { earned: 0, used: 0 }
-      ),
-    [pointHistory]
+      Object.values(dailyStats).reduce((sum, stat) => sum + (Number(stat?.pointsEarned) || 0), 0),
+    [dailyStats]
   );
+
+  // 선물에 사용한 포인트: pointLogs(엄마가 차감한 내역)의 절대값 합.
+  const totalUsed = useMemo(
+    () =>
+      pointLogs.reduce(
+        (sum, entry) => sum + Math.abs(Number(entry.amount ?? entry.points ?? 0) || 0),
+        0
+      ),
+    [pointLogs]
+  );
+
+  // 포인트 발자국: dailyStats(학습으로 얻은 포인트)와 pointLogs(보상으로 차감된 포인트)를
+  // 하나의 배열로 합친 뒤 날짜 기준 최신순으로 정렬한다.
+  const footprintEntries = useMemo(() => {
+    const earnedEntries = Object.entries(dailyStats)
+      .filter(([, stat]) => (Number(stat?.pointsEarned) || 0) !== 0)
+      .map(([dateKey, stat]) => ({
+        key: `daily-${dateKey}`,
+        date: toISODate(dateKey) ?? dateKey,
+        label: '📚 문제 풀이 완료',
+        amount: Number(stat?.pointsEarned) || 0,
+      }));
+
+    const redeemedEntries = pointLogs.map((entry, index) => {
+      const rawDate = entry.date ?? entry.createdAt ?? entry.timestamp ?? entry.redeemedAt;
+      return {
+        key: entry.id ?? `redeem-${index}-${rawDate ?? index}`,
+        date: toISODate(rawDate) ?? String(rawDate ?? '').slice(0, 10),
+        label: `🎁 ${entry.item ?? entry.description ?? '보상 사용'}`,
+        amount: -Math.abs(Number(entry.amount ?? entry.points ?? 0) || 0),
+      };
+    });
+
+    return [...earnedEntries, ...redeemedEntries].sort((a, b) =>
+      (b.date || '').localeCompare(a.date || '')
+    );
+  }, [dailyStats, pointLogs]);
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -207,14 +235,14 @@ export default function RewardStore({ currentPoints = 0, pointHistory = [], onRe
       <div className="mb-5 grid gap-3 sm:grid-cols-3">
         <div className="rounded-3xl border-2 border-rose-100 bg-white p-5 text-center shadow-lg shadow-amber-100/60">
           <p className="text-xs font-bold text-stone-400">그동안 모은 포인트</p>
-          <p className="mt-1 text-2xl font-extrabold text-rose-500">
-            +{stats.earned.toLocaleString()}P
+          <p className="mt-1 text-2xl font-extrabold text-sky-600">
+            +{totalEarned.toLocaleString()}P
           </p>
         </div>
         <div className="rounded-3xl border-2 border-amber-100 bg-white p-5 text-center shadow-lg shadow-amber-100/60">
           <p className="text-xs font-bold text-stone-400">선물에 사용한 포인트</p>
           <p className="mt-1 text-2xl font-extrabold text-orange-500">
-            -{stats.used.toLocaleString()}P
+            -{totalUsed.toLocaleString()}P
           </p>
         </div>
         <button
@@ -229,42 +257,33 @@ export default function RewardStore({ currentPoints = 0, pointHistory = [], onRe
 
       <section className="rounded-[2rem] border-2 border-rose-100 bg-white p-4 shadow-lg shadow-amber-100/60 md:p-6">
         <h3 className="mb-4 text-lg font-extrabold text-stone-700">🐾 포인트 발자국</h3>
-        {pointHistory.length === 0 ? (
+        {footprintEntries.length === 0 ? (
           <p className="rounded-2xl bg-amber-50 py-12 text-center text-sm font-semibold text-amber-600">
             아직 포인트 기록이 없어요. 문제를 풀고 첫 포인트를 모아볼까요? 🐶
           </p>
         ) : (
-          <div className="max-h-[50vh] space-y-2 overflow-y-auto">
-            {pointHistory.map((entry, index) => {
-              const amount = getHistoryAmount(entry);
-              return (
-                <div
-                  key={entry.id ?? `${entry.date ?? entry.createdAt}-${index}`}
-                  className="flex flex-wrap items-center gap-3 rounded-2xl border-2 border-amber-50 bg-amber-50/40 p-3"
-                >
-                  <span className="text-2xl">{amount >= 0 ? '⭐' : '🎁'}</span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-extrabold text-stone-600">
-                      {entry.item ?? entry.description ?? entry.code ?? (amount >= 0 ? '문제 풀이 포인트' : '보상 사용')}
-                    </p>
-                    <p className="text-xs font-semibold text-stone-400">
-                      {formatDate(entry.date ?? entry.createdAt ?? entry.timestamp)}
-                    </p>
-                  </div>
-                  <span
-                    className={`rounded-full px-3 py-1 text-sm font-extrabold ${
-                      amount >= 0
-                        ? 'bg-yellow-200 text-amber-800'
-                        : 'bg-rose-100 text-rose-600'
-                    }`}
-                  >
-                    {amount >= 0 ? '+' : '-'}
-                    {Math.abs(amount).toLocaleString()}P
-                  </span>
+          <ul className="max-h-[50vh] space-y-2 overflow-y-auto">
+            {footprintEntries.map((entry) => (
+              <li
+                key={entry.key}
+                className="flex flex-wrap items-center gap-3 rounded-2xl border-2 border-amber-50 bg-amber-50/40 p-3"
+              >
+                <span className="text-2xl">{entry.amount >= 0 ? '⭐' : '🎁'}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-extrabold text-stone-600">{entry.label}</p>
+                  <p className="text-xs font-semibold text-stone-400">{formatDate(entry.date)}</p>
                 </div>
-              );
-            })}
-          </div>
+                <span
+                  className={`rounded-full px-3 py-1 text-sm font-extrabold ${
+                    entry.amount >= 0 ? 'bg-sky-100 text-sky-600' : 'bg-rose-100 text-rose-600'
+                  }`}
+                >
+                  {entry.amount >= 0 ? '+' : '-'}
+                  {Math.abs(entry.amount).toLocaleString()}P
+                </span>
+              </li>
+            ))}
+          </ul>
         )}
       </section>
 
