@@ -13,21 +13,44 @@ export async function fetchProblems() {
 
 // 특정 문제의 채점 결과와 아이가 캔버스에 작성한 풀이 이미지를 업데이트
 // Content-Type을 text/plain으로 보내야 Apps Script Web App에서 CORS preflight 없이 처리된다.
-export async function submitGrade(rowNumber, isCorrect, code, canvasImage) {
+export async function submitGrade(rowNumber, isCorrect, code, canvasImage, solveTimeSec) {
   const res = await fetch(API_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify({
       rowNumber,
       isCorrect,
+      // 학습기록 B열에 반드시 기록되어야 하는 현재 문제 파일명
       code,
       canvasImage: canvasImage || null,
+      solveTimeSec: Math.max(0, Math.round(Number(solveTimeSec) || 0)),
     }),
   });
   if (!res.ok) {
     throw new Error('채점 결과 전송에 실패했습니다.');
   }
   return res.json().catch(() => ({}));
+}
+
+// 엄마가 인증 후 보상을 선물하면 구글 시트의 포인트 잔액을 차감한다.
+export async function redeemPoints(item, amount) {
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      type: 'REDEEM_POINT',
+      item,
+      amount: Math.round(Number(amount)),
+    }),
+  });
+  if (!res.ok) {
+    throw new Error('포인트 차감에 실패했습니다.');
+  }
+  const data = await res.json().catch(() => ({}));
+  if (data?.success === false) {
+    throw new Error(data.message || '포인트 차감에 실패했습니다.');
+  }
+  return data;
 }
 
 // 구글 시트가 반환하는 "drive.google.com/uc?export=view&id=..." 형태의 링크는
