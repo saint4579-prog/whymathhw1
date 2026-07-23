@@ -14,6 +14,14 @@ function getStoredUserName() {
   }
 }
 
+async function parseApiResponse(res, fallbackMessage) {
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.status === 'error' || data?.success === false) {
+    throw new Error(data?.message || fallbackMessage);
+  }
+  return data;
+}
+
 // 전체 문제 목록(392개)을 구글 시트에서 조회. 학생별 학습 기록/포인트가 분리되어 있으므로
 // localStorage의 userInfo.name을 userName 쿼리 파라미터로 함께 전달한다.
 export async function fetchProblems() {
@@ -47,7 +55,7 @@ export async function submitGrade(rowNumber, isCorrect, code, canvasImage, solve
   if (!res.ok) {
     throw new Error('채점 결과 전송에 실패했습니다.');
   }
-  return res.json().catch(() => ({}));
+  return parseApiResponse(res, '채점 결과 전송에 실패했습니다.');
 }
 
 // 엄마가 인증 후 보상을 선물하면 구글 시트의 포인트 잔액을 차감한다.
@@ -64,14 +72,7 @@ export async function redeemPoints(item, amount, userName) {
       userName: userName ?? getStoredUserName(),
     }),
   });
-  if (!res.ok) {
-    throw new Error('포인트 차감에 실패했습니다.');
-  }
-  const data = await res.json().catch(() => ({}));
-  if (data?.success === false) {
-    throw new Error(data.message || '포인트 차감에 실패했습니다.');
-  }
-  return data;
+  return parseApiResponse(res, '포인트 차감에 실패했습니다.');
 }
 
 // 최초 접속 시 학년/이름/성별을 구글 시트에 등록한다.
@@ -87,14 +88,7 @@ export async function registerUser(grade, name, gender) {
       gender,
     }),
   });
-  if (!res.ok) {
-    throw new Error('사용자 등록에 실패했습니다.');
-  }
-  const data = await res.json().catch(() => ({}));
-  if (data?.success === false) {
-    throw new Error(data.message || '사용자 등록에 실패했습니다.');
-  }
-  return data;
+  return parseApiResponse(res, '사용자 등록에 실패했습니다.');
 }
 
 // 구글 시트가 반환하는 "drive.google.com/uc?export=view&id=..." 형태의 링크는

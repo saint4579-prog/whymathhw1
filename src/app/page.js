@@ -10,6 +10,7 @@ import MonthlyPlanner from '@/components/MonthlyPlanner';
 import RewardStore from '@/components/RewardStore';
 import UserRegistration from '@/components/UserRegistration';
 import { fetchProblems, redeemPoints, registerUser, submitGrade } from '@/lib/api';
+import { toISODate } from '@/lib/dateUtils';
 import { sortProblemsByPage } from '@/lib/problemUtils';
 import { recordAttempt } from '@/lib/reviewSchedule';
 
@@ -80,6 +81,12 @@ function getPointDelta(entry) {
   return type.includes('REDEEM') || type.includes('USE') || type.includes('SPEND')
     ? -Math.abs(amount)
     : amount;
+}
+
+function getLocalDateKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate()
+  ).padStart(2, '0')}`;
 }
 
 export default function Home() {
@@ -265,9 +272,20 @@ export default function Home() {
       getNumericValue(responseRoot, ['pointsEarned', 'earnedPoints', 'rewardPoints']) ??
       getNumericValue(responseRoot?.pointRecord, ['amount', 'points']);
     const pointsEarned =
-      explicitEarnedPoints ?? (responseBalance == null ? 0 : Math.max(0, responseBalance - currentPoints));
+      explicitEarnedPoints ??
+      (responseBalance == null
+        ? isCorrect === 'O'
+          ? 20
+          : 10
+        : Math.max(0, responseBalance - currentPoints));
     const studiedAt =
       responseRoot?.studiedAt ?? responseRoot?.createdAt ?? new Date().toISOString();
+    const historyLog = {
+      date: studiedAt,
+      isCorrect,
+      imageUrl: submittedUrl || '',
+      solveTimeSec,
+    };
 
     recordAttempt(problem.rowNumber, isCorrect);
     setProblems((prev) =>
@@ -277,10 +295,27 @@ export default function Home() {
               ...p,
               submitted: submittedUrl || p.submitted || true,
               isCorrect,
+              reviewCount: (Number(p.reviewCount) || 0) + 1,
+              historyLogs: [...(Array.isArray(p.historyLogs) ? p.historyLogs : []), historyLog],
             }
           : p
       )
     );
+    setDailyStats((prev) => {
+      const todayKey = getLocalDateKey();
+      const existingKey =
+        Object.keys(prev).find((key) => toISODate(key) === todayKey) ?? todayKey;
+      const previousStat = prev[existingKey] ?? {};
+      return {
+        ...prev,
+        [existingKey]: {
+          ...previousStat,
+          solvedCount: (Number(previousStat.solvedCount) || 0) + 1,
+          totalTimeSec: (Number(previousStat.totalTimeSec) || 0) + solveTimeSec,
+          pointsEarned: (Number(previousStat.pointsEarned) || 0) + pointsEarned,
+        },
+      };
+    });
 
     if (pointsEarned > 0) {
       const pointEntry = {
@@ -338,6 +373,7 @@ export default function Home() {
       writeLocalValue(POINT_HISTORY_KEY, next);
       return next;
     });
+    setPointLogs((prev) => [pointEntry, ...prev]);
     return response;
   };
 
