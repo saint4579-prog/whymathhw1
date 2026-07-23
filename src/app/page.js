@@ -219,10 +219,18 @@ export default function Home() {
     });
   };
 
-  const toggleAllRows = () => {
+  const toggleAllRows = (rowNumbers) => {
+    const targetRows = Array.isArray(rowNumbers)
+      ? rowNumbers
+      : problems.map((problem) => problem.rowNumber);
     setSelectedRows((prev) => {
-      const allSelected = problems.length > 0 && problems.every((p) => prev.has(p.rowNumber));
-      return allSelected ? new Set() : new Set(problems.map((p) => p.rowNumber));
+      const next = new Set(prev);
+      const allSelected = targetRows.length > 0 && targetRows.every((rowNumber) => prev.has(rowNumber));
+      targetRows.forEach((rowNumber) => {
+        if (allSelected) next.delete(rowNumber);
+        else next.add(rowNumber);
+      });
+      return next;
     });
   };
 

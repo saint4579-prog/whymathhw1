@@ -74,7 +74,7 @@ export default function ProblemListTable({
                 <input
                   type="checkbox"
                   checked={allSelected}
-                  onChange={() => onToggleAll?.()}
+                  onChange={() => onToggleAll?.(problems.map((problem) => problem.rowNumber))}
                   aria-label="전체 선택"
                   className="h-4 w-4 accent-rose-400"
                 />

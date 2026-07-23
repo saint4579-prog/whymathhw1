@@ -8,7 +8,7 @@ const GENDER_OPTIONS = [
   { value: '여', label: '여' },
 ];
 
-// 최초 접속 시 1회만 노출되는 사용자 등록 화면. onSubmit이 실패하면 에러 메시지만 보여주고 화면에 남는다.
+// 등록된 이름은 로그인하고, 처음 온 이름만 새 사용자로 저장한다.
 export default function UserRegistration({ onSubmit }) {
   const [grade, setGrade] = useState('');
   const [name, setName] = useState('');
@@ -53,10 +53,10 @@ export default function UserRegistration({ onSubmit }) {
         <div className="mb-6 text-center">
           <p className="text-4xl">🐶🐾</p>
           <h1 className="mt-3 text-xl font-extrabold text-stone-700">
-            처음 오셨네요. 정보를 입력해 주세요.
+            이름을 입력하고 시작해요!
           </h1>
           <p className="mt-1 text-sm font-semibold text-amber-500">
-            멍멍이가 우리 친구를 기억할 수 있게 알려주세요!
+            등록된 이름이면 바로 로그인하고, 처음 온 친구만 새로 등록해요.
           </p>
         </div>
 
@@ -107,7 +107,7 @@ export default function UserRegistration({ onSubmit }) {
             disabled={submitting}
             className="w-full rounded-2xl bg-emerald-400 py-3 font-extrabold text-white shadow-lg shadow-emerald-200 hover:bg-emerald-500 disabled:cursor-wait disabled:opacity-60"
           >
-            {submitting ? '🐾 등록하는 중이에요...' : '등록하고 시작하기 🐶'}
+            {submitting ? '🐾 멍멍이가 확인하는 중이에요...' : '로그인 / 처음 시작하기 🐶'}
           </button>
         </form>
       </div>
