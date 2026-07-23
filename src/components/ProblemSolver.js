@@ -207,7 +207,9 @@ export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLa
   const canvasRef = useRef(null);
   const splitContainerRef = useRef(null);
   const activeDraftKeyRef = useRef(null);
+  const timerStartedAtRef = useRef(Date.now());
   const [submitting, setSubmitting] = useState(false);
+  const [elapsedTimeSec, setElapsedTimeSec] = useState(0);
   const [copyingHint, setCopyingHint] = useState(false);
   const [layoutMode, setLayoutMode] = useState('horizontal');
   const [splitRatio, setSplitRatio] = useState(50);
@@ -217,6 +219,15 @@ export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLa
   const problem = queue[index];
   const problemKey = getProblemKey(problem);
   const viewableImageUrl = toViewableImageUrl(problem?.imageUrl);
+
+  useEffect(() => {
+    timerStartedAtRef.current = Date.now();
+    setElapsedTimeSec(0);
+    const timerId = window.setInterval(() => {
+      setElapsedTimeSec(Math.floor((Date.now() - timerStartedAtRef.current) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timerId);
+  }, [problemKey]);
 
   useEffect(() => {
     const savedMode = window.localStorage.getItem(LAYOUT_MODE_KEY);
@@ -257,9 +268,13 @@ export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLa
   const handleGrade = async (isCorrect) => {
     if (!problem || submitting) return;
     const canvasDataURL = canvasRef.current?.getDataURL() ?? null;
+    const solveTimeSec = Math.max(
+      1,
+      Math.floor((Date.now() - timerStartedAtRef.current) / 1000)
+    );
     setSubmitting(true);
     try {
-      await onGrade(problem, isCorrect, canvasDataURL);
+      await onGrade(problem, isCorrect, canvasDataURL, solveTimeSec);
       canvasRef.current?.clear();
       removeDraft(problemKey);
       if (index + 1 < queue.length) setIndex(index + 1);
@@ -338,6 +353,10 @@ export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLa
             </span>
           )}
           {index + 1} / {queue.length} · {problem.code}
+          <span className="ml-2 inline-block rounded-full bg-sky-100 px-3 py-1 text-xs font-extrabold text-sky-600">
+            ⏱️ {String(Math.floor(elapsedTimeSec / 60)).padStart(2, '0')}:
+            {String(elapsedTimeSec % 60).padStart(2, '0')}
+          </span>
         </p>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <button

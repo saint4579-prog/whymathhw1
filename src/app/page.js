@@ -6,15 +6,89 @@ import Dashboard from '@/components/Dashboard';
 import WrongNotebook from '@/components/WrongNotebook';
 import ReviewMode from '@/components/ReviewMode';
 import ProblemSolver from '@/components/ProblemSolver';
-import { fetchProblems, submitGrade } from '@/lib/api';
+import MonthlyPlanner from '@/components/MonthlyPlanner';
+import RewardStore from '@/components/RewardStore';
+import { fetchProblems, redeemPoints, submitGrade } from '@/lib/api';
 import { sortProblemsByPage } from '@/lib/problemUtils';
 import { recordAttempt } from '@/lib/reviewSchedule';
+
+const STUDY_RECORDS_KEY = 'dog-math-study-records';
+const POINT_HISTORY_KEY = 'dog-math-point-history';
+const CURRENT_POINTS_KEY = 'dog-math-current-points';
+
+function readLocalArray(key) {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(key) || '[]');
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalValue(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // 저장소가 막힌 환경에서도 현재 화면의 상태는 계속 유지한다.
+  }
+}
+
+function entryKey(entry) {
+  return (
+    entry.id ??
+    entry.recordId ??
+    [
+      entry.studyDate ?? entry.date ?? entry.studiedAt ?? entry.createdAt ?? entry.timestamp,
+      entry.rowNumber,
+      entry.code ?? entry.contentCode ?? entry.item,
+      entry.isCorrect,
+      entry.solveTimeSec,
+      entry.amount ?? entry.points,
+    ].join('|')
+  );
+}
+
+function mergeEntries(...lists) {
+  const merged = new Map();
+  lists.flat().forEach((entry) => {
+    if (!entry || typeof entry !== 'object') return;
+    merged.set(entryKey(entry), entry);
+  });
+  return [...merged.values()].sort((a, b) => {
+    const aDate = new Date(a.studiedAt ?? a.createdAt ?? a.date ?? a.timestamp ?? 0).getTime();
+    const bDate = new Date(b.studiedAt ?? b.createdAt ?? b.date ?? b.timestamp ?? 0).getTime();
+    return bDate - aDate;
+  });
+}
+
+function getPayloadRoot(payload) {
+  return payload?.data && !Array.isArray(payload.data) ? payload.data : payload;
+}
+
+function getNumericValue(source, keys) {
+  for (const key of keys) {
+    const value = Number(source?.[key]);
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
+function getPointDelta(entry) {
+  const amount = Number(entry?.amount ?? entry?.points ?? entry?.point ?? 0) || 0;
+  const type = String(entry?.type ?? entry?.action ?? '').toUpperCase();
+  return type.includes('REDEEM') || type.includes('USE') || type.includes('SPEND')
+    ? -Math.abs(amount)
+    : amount;
+}
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [problems, setProblems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [studyRecords, setStudyRecords] = useState([]);
+  const [pointHistory, setPointHistory] = useState([]);
+  const [currentPoints, setCurrentPoints] = useState(0);
 
   // 현재 풀이 세션(문제풀기 탭)에서 순회할 문제 목록과 인덱스.
   // 어느 탭에서 [풀기]를 눌렀는지에 따라 전체 목록/오답노트/망각곡선 복습/오늘의 학습 목표 중 하나가 들어간다.
@@ -29,8 +103,39 @@ export default function Home() {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchProblems();
-      setProblems(sortProblemsByPage(Array.isArray(data) ? data : []));
+      const payload = await fetchProblems();
+      const root = getPayloadRoot(payload);
+      const problemList = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.data)
+          ? payload.data
+          : root?.problems ?? root?.items ?? [];
+      const remoteStudyRecords =
+        root?.studyRecords ?? root?.learningRecords ?? root?.studyHistory ?? [];
+      const remotePointHistory =
+        root?.pointHistory ?? root?.pointRecords ?? root?.rewardHistory ?? [];
+      const localStudyRecords = readLocalArray(STUDY_RECORDS_KEY);
+      const localPointHistory = readLocalArray(POINT_HISTORY_KEY);
+      const mergedStudyRecords = mergeEntries(remoteStudyRecords, localStudyRecords);
+      const mergedPointHistory = mergeEntries(remotePointHistory, localPointHistory);
+      const savedPointValue = window.localStorage.getItem(CURRENT_POINTS_KEY);
+      const historyBalance = Math.max(
+        0,
+        mergedPointHistory.reduce((sum, entry) => sum + getPointDelta(entry), 0)
+      );
+      const savedPoints =
+        savedPointValue == null ? historyBalance : Number(savedPointValue) || 0;
+      const loadedPoints =
+        getNumericValue(root, ['currentPoints', 'pointBalance', 'currentBalance', 'balance']) ??
+        savedPoints;
+
+      setProblems(sortProblemsByPage(Array.isArray(problemList) ? problemList : []));
+      setStudyRecords(mergedStudyRecords);
+      setPointHistory(mergedPointHistory);
+      setCurrentPoints(loadedPoints);
+      writeLocalValue(STUDY_RECORDS_KEY, mergedStudyRecords);
+      writeLocalValue(POINT_HISTORY_KEY, mergedPointHistory);
+      window.localStorage.setItem(CURRENT_POINTS_KEY, String(loadedPoints));
     } catch (e) {
       setError(e.message);
     } finally {
@@ -100,14 +205,49 @@ export default function Home() {
   };
 
   // ProblemSolver에서 O/X 채점 시 호출: 구글 시트로 결과 전송 + 로컬 복습 스케줄 갱신 + 상태 갱신
-  const handleGrade = async (problem, isCorrect, canvasImage) => {
-    const response = await submitGrade(problem.rowNumber, isCorrect, problem.code, canvasImage);
+  const handleGrade = async (problem, isCorrect, canvasImage, solveTimeSec) => {
+    // code는 학습기록 B열 콘텐츠 코드에 필요하므로 현재 문제에서 직접 전달한다.
+    const response = await submitGrade(
+      problem.rowNumber,
+      isCorrect,
+      problem.code,
+      canvasImage,
+      solveTimeSec
+    );
+    const responseRoot = getPayloadRoot(response);
     const submittedUrl =
-      response?.submittedUrl ||
-      response?.canvasImageUrl ||
-      response?.imageUrl ||
-      response?.url ||
-      (typeof response?.submitted === 'string' ? response.submitted : null);
+      responseRoot?.submittedUrl ||
+      responseRoot?.canvasImageUrl ||
+      responseRoot?.imageUrl ||
+      responseRoot?.url ||
+      (typeof responseRoot?.submitted === 'string' ? responseRoot.submitted : null);
+    const responseBalance = getNumericValue(responseRoot, [
+      'currentPoints',
+      'pointBalance',
+      'currentBalance',
+      'balance',
+    ]);
+    const explicitEarnedPoints =
+      getNumericValue(responseRoot, ['pointsEarned', 'earnedPoints', 'rewardPoints']) ??
+      getNumericValue(responseRoot?.pointRecord, ['amount', 'points']);
+    const pointsEarned =
+      explicitEarnedPoints ?? (responseBalance == null ? 0 : Math.max(0, responseBalance - currentPoints));
+    const studiedAt =
+      responseRoot?.studiedAt ?? responseRoot?.createdAt ?? new Date().toISOString();
+    const localRecord = {
+      ...(responseRoot?.studyRecord ?? {}),
+      id:
+        responseRoot?.studyRecord?.id ??
+        `study-${problem.rowNumber}-${Date.now()}`,
+      studyDate: responseRoot?.studyRecord?.studyDate ?? studiedAt,
+      studiedAt,
+      rowNumber: problem.rowNumber,
+      code: problem.code,
+      isCorrect,
+      solveTimeSec,
+      pointsEarned,
+    };
+
     recordAttempt(problem.rowNumber, isCorrect);
     setProblems((prev) =>
       prev.map((p) =>
@@ -120,12 +260,78 @@ export default function Home() {
           : p
       )
     );
+    setStudyRecords((prev) => {
+      const next = mergeEntries(localRecord, prev);
+      writeLocalValue(STUDY_RECORDS_KEY, next);
+      return next;
+    });
+
+    if (pointsEarned > 0) {
+      const pointEntry = {
+        id: responseRoot?.pointRecord?.id ?? `earn-${problem.rowNumber}-${Date.now()}`,
+        type: 'EARN_POINT',
+        item: problem.code,
+        amount: pointsEarned,
+        date: studiedAt,
+        ...(responseRoot?.pointRecord ?? {}),
+      };
+      setPointHistory((prev) => {
+        const next = mergeEntries(pointEntry, prev);
+        writeLocalValue(POINT_HISTORY_KEY, next);
+        return next;
+      });
+    }
+
+    if (responseBalance != null) {
+      setCurrentPoints(responseBalance);
+      window.localStorage.setItem(CURRENT_POINTS_KEY, String(responseBalance));
+    } else if (pointsEarned > 0) {
+      setCurrentPoints((prev) => {
+        const next = prev + pointsEarned;
+        window.localStorage.setItem(CURRENT_POINTS_KEY, String(next));
+        return next;
+      });
+    }
+    return response;
+  };
+
+  const handleRedeemPoints = async (item, amount) => {
+    const response = await redeemPoints(item, amount);
+    const responseRoot = getPayloadRoot(response);
+    const nextBalance =
+      getNumericValue(responseRoot, [
+        'currentPoints',
+        'pointBalance',
+        'currentBalance',
+        'balance',
+      ]) ?? Math.max(0, currentPoints - amount);
+    const redeemedAt = responseRoot?.createdAt ?? responseRoot?.redeemedAt ?? new Date().toISOString();
+    const pointEntry = {
+      id: responseRoot?.pointRecord?.id ?? `redeem-${Date.now()}`,
+      type: 'REDEEM_POINT',
+      item,
+      amount: -Math.abs(amount),
+      date: redeemedAt,
+      ...(responseRoot?.pointRecord ?? {}),
+    };
+
+    setCurrentPoints(nextBalance);
+    window.localStorage.setItem(CURRENT_POINTS_KEY, String(nextBalance));
+    setPointHistory((prev) => {
+      const next = mergeEntries(pointEntry, prev);
+      writeLocalValue(POINT_HISTORY_KEY, next);
+      return next;
+    });
     return response;
   };
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-amber-50 via-rose-50/40 to-amber-50 pb-10">
-      <Header activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Header
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        currentPoints={currentPoints}
+      />
       <div className="p-4 md:p-6">
         {loading && <p className="py-20 text-center text-lg text-amber-700">🐾 강아지가 문제를 물어오는 중... 🐶</p>}
         {!loading && error && (
@@ -169,6 +375,16 @@ export default function Home() {
             setIndex={setSolverIndex}
             onGrade={handleGrade}
             queueLabel={solverLabel}
+          />
+        )}
+        {!loading && !error && activeTab === 'planner' && (
+          <MonthlyPlanner studyRecords={studyRecords} />
+        )}
+        {!loading && !error && activeTab === 'store' && (
+          <RewardStore
+            currentPoints={currentPoints}
+            pointHistory={pointHistory}
+            onRedeem={handleRedeemPoints}
           />
         )}
       </div>
