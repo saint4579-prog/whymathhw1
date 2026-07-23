@@ -195,7 +195,7 @@ function CelebrationModal({ onClose }) {
 // 1) SOLVING: 문제를 차례로 풀며 캔버스 그림을 problem.code를 키로 삼아 savedDrawings에 임시 저장한다.
 //    O/X 채점 버튼은 숨기고, 대신 [다음 문제]/[채점 시작하기] 버튼만 노출한다.
 // 2) GRADING: 처음 문제로 돌아가 savedDrawings에 저장해둔 손글씨를 읽기 전용 캔버스로 보여주며 O/X로 채점한다.
-export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLabel, onFinish }) {
+export default function ProblemSolver({ queue, setQueue, index, setIndex, onGrade, queueLabel, onFinish }) {
   const canvasRef = useRef(null);
   const splitContainerRef = useRef(null);
   const activeKeyRef = useRef(null);
@@ -215,6 +215,7 @@ export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLa
   const [imageFitMode, setImageFitMode] = useState('contain');
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
   const [isCelebrationOpen, setIsCelebrationOpen] = useState(false);
+  const [hasCanvasContent, setHasCanvasContent] = useState(false);
 
   const problem = queue[index];
   const problemKey = problem?.code ?? null;
@@ -271,6 +272,7 @@ export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLa
 
     const sourceDataURL = problemKey ? savedDrawingsRef.current[problemKey] ?? null : null;
     canvasRef.current?.restore(sourceDataURL);
+    setHasCanvasContent(Boolean(sourceDataURL));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [problemKey, phase]);
 
@@ -311,6 +313,21 @@ export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLa
 
   const handleResetCanvas = () => {
     canvasRef.current?.clear();
+    setHasCanvasContent(false);
+  };
+
+  // 아이가 원하는 만큼만 풀고 바로 채점 모드로 넘어가고 싶을 때 사용한다.
+  // index 0 ~ 현재 index까지, 즉 실제로 풀이한 문제만 추려서 채점 대상 큐로 재설정한다.
+  const canStopAndGrade = isSolving && (index > 0 || hasCanvasContent);
+
+  const handleStopAndGrade = () => {
+    if (!canStopAndGrade || submitting) return;
+    const solvedCount = index + 1;
+    const confirmed = window.confirm(`지금까지 푼 ${solvedCount}문제만 바로 채점할까요?`);
+    if (!confirmed) return;
+    setQueue(queue.slice(0, solvedCount));
+    setPhase(PHASE.GRADING);
+    setIndex(0);
   };
 
   const handleHint = async () => {
@@ -398,6 +415,16 @@ export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLa
           >
             {horizontal ? '↔️ 옆으로 보기 (현재)' : '↕️ 위아래로 보기 (현재)'}
           </button>
+          {isSolving && (
+            <button
+              type="button"
+              onClick={handleStopAndGrade}
+              disabled={!canStopAndGrade || submitting}
+              className="rounded-full border-2 border-orange-200 bg-white px-4 py-1.5 text-xs font-bold text-orange-600 shadow-sm hover:bg-orange-50 disabled:opacity-40"
+            >
+              🛑 여기까지만 풀고 채점하기
+            </button>
+          )}
           <button
             type="button"
             onClick={goToPrev}
@@ -515,7 +542,11 @@ export default function ProblemSolver({ queue, index, setIndex, onGrade, queueLa
           }`}
         >
           <div className="relative min-h-[260px] flex-1">
-            <Canvas ref={canvasRef} disabled={!isSolving || isDraggingSplitter || submitting} />
+            <Canvas
+              ref={canvasRef}
+              disabled={!isSolving || isDraggingSplitter || submitting}
+              onDrawEnd={setHasCanvasContent}
+            />
             {isSolving && (
               <button
                 type="button"

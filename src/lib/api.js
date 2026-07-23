@@ -2,9 +2,24 @@ const API_URL =
   process.env.NEXT_PUBLIC_SHEET_API_URL ||
   'https://script.google.com/macros/s/AKfycbz9qdyqPLpDUHthPDpnynv0uSivgayGtMbOSfFdFLQNlqtpS_swx7eWug6i0orQsvtw/exec';
 
-// 전체 문제 목록(392개)을 구글 시트에서 조회
+// localStorage에 저장된 userInfo에서 이름만 꺼낸다. (등록 전이거나 저장소 접근이 막힌 환경은 null)
+function getStoredUserName() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem('userInfo');
+    if (!raw) return null;
+    return JSON.parse(raw)?.name ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// 전체 문제 목록(392개)을 구글 시트에서 조회. 학생별 학습 기록/포인트가 분리되어 있으므로
+// localStorage의 userInfo.name을 userName 쿼리 파라미터로 함께 전달한다.
 export async function fetchProblems() {
-  const res = await fetch(API_URL, { cache: 'no-store' });
+  const userName = getStoredUserName();
+  const url = userName ? `${API_URL}?userName=${encodeURIComponent(userName)}` : API_URL;
+  const res = await fetch(url, { cache: 'no-store' });
   if (!res.ok) {
     throw new Error('문제 목록을 불러오지 못했습니다.');
   }
@@ -13,7 +28,7 @@ export async function fetchProblems() {
 
 // 특정 문제의 채점 결과와 아이가 캔버스에 작성한 풀이 이미지를 업데이트
 // Content-Type을 text/plain으로 보내야 Apps Script Web App에서 CORS preflight 없이 처리된다.
-export async function submitGrade(rowNumber, isCorrect, code, canvasImage, solveTimeSec) {
+export async function submitGrade(rowNumber, isCorrect, code, canvasImage, solveTimeSec, userName) {
   const res = await fetch(API_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -25,6 +40,8 @@ export async function submitGrade(rowNumber, isCorrect, code, canvasImage, solve
       code,
       canvasImage: canvasImage || null,
       solveTimeSec: Math.max(0, Math.round(Number(solveTimeSec) || 0)),
+      // 학생별로 학습 기록/포인트를 분리하기 위한 사용자 식별자
+      userName: userName ?? getStoredUserName(),
     }),
   });
   if (!res.ok) {
@@ -34,7 +51,7 @@ export async function submitGrade(rowNumber, isCorrect, code, canvasImage, solve
 }
 
 // 엄마가 인증 후 보상을 선물하면 구글 시트의 포인트 잔액을 차감한다.
-export async function redeemPoints(item, amount) {
+export async function redeemPoints(item, amount, userName) {
   const res = await fetch(API_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -43,6 +60,8 @@ export async function redeemPoints(item, amount) {
       type: 'REDEEM_POINT',
       item,
       amount: Math.round(Number(amount)),
+      // 학생별로 포인트를 분리하기 위한 사용자 식별자
+      userName: userName ?? getStoredUserName(),
     }),
   });
   if (!res.ok) {

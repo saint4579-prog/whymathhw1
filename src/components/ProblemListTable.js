@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { isSolved } from '@/lib/problemUtils';
 import ProblemDetailModal from './ProblemDetailModal';
+import ProblemHistoryModal from './ProblemHistoryModal';
 
 function StatusBadge({ problem }) {
   if (!isSolved(problem)) {
@@ -26,6 +27,22 @@ function StatusBadge({ problem }) {
   );
 }
 
+// 복습 횟수 뱃지: 클릭하면 해당 문제의 날짜별 풀이 기록(historyLogs) 모달이 열린다.
+function ReviewCountBadge({ count, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      className="cursor-pointer rounded-full bg-sky-50 px-3 py-1 text-xs font-bold text-sky-600 transition hover:bg-sky-100 hover:shadow-sm"
+    >
+      {count > 0 ? `${count}회 풀음 🐾` : '0회'}
+    </button>
+  );
+}
+
 // 전체 현황판 / 오답노트 / 망각곡선 복습 탭에서 공용으로 쓰는 문제 목록 테이블.
 // selectable이 true일 때만 체크박스 열이 표시된다 (오늘의 학습 목표 선택용).
 export default function ProblemListTable({
@@ -38,6 +55,7 @@ export default function ProblemListTable({
   emptyMessage = '표시할 문제가 없습니다.',
 }) {
   const [selectedProblem, setSelectedProblem] = useState(null);
+  const [historyProblem, setHistoryProblem] = useState(null);
 
   if (problems.length === 0) {
     return <p className="py-16 text-center text-amber-500">🐾 {emptyMessage}</p>;
@@ -65,6 +83,7 @@ export default function ProblemListTable({
             <th className="w-16 px-4 py-3">번호</th>
             <th className="px-4 py-3">문제 파일명</th>
             <th className="w-36 px-4 py-3">상태</th>
+            <th className="w-28 px-4 py-3">복습 횟수</th>
             <th className="w-24 px-4 py-3">액션</th>
           </tr>
         </thead>
@@ -102,6 +121,12 @@ export default function ProblemListTable({
                 <StatusBadge problem={p} />
               </td>
               <td className="px-4 py-2">
+                <ReviewCountBadge
+                  count={Number(p.reviewCount) || (Array.isArray(p.historyLogs) ? p.historyLogs.length : 0)}
+                  onClick={() => setHistoryProblem(p)}
+                />
+              </td>
+              <td className="px-4 py-2">
                 <button
                   type="button"
                   onClick={(event) => {
@@ -120,6 +145,9 @@ export default function ProblemListTable({
       </div>
       {selectedProblem && (
         <ProblemDetailModal problem={selectedProblem} onClose={() => setSelectedProblem(null)} />
+      )}
+      {historyProblem && (
+        <ProblemHistoryModal problem={historyProblem} onClose={() => setHistoryProblem(null)} />
       )}
     </>
   );

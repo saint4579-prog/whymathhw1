@@ -13,7 +13,6 @@ import { fetchProblems, redeemPoints, registerUser, submitGrade } from '@/lib/ap
 import { sortProblemsByPage } from '@/lib/problemUtils';
 import { recordAttempt } from '@/lib/reviewSchedule';
 
-const STUDY_RECORDS_KEY = 'dog-math-study-records';
 const POINT_HISTORY_KEY = 'dog-math-point-history';
 const CURRENT_POINTS_KEY = 'dog-math-current-points';
 const USER_INFO_KEY = 'userInfo';
@@ -90,7 +89,6 @@ export default function Home() {
   const [problems, setProblems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [studyRecords, setStudyRecords] = useState([]);
   const [pointHistory, setPointHistory] = useState([]);
   const [currentPoints, setCurrentPoints] = useState(0);
   // 보상 상점 화면용 원본 데이터: 백엔드가 실제로 내려주는 필드는
@@ -118,13 +116,9 @@ export default function Home() {
         : Array.isArray(payload?.data)
           ? payload.data
           : root?.problems ?? root?.items ?? [];
-      const remoteStudyRecords =
-        root?.studyRecords ?? root?.learningRecords ?? root?.studyHistory ?? [];
       const remotePointHistory =
         root?.pointHistory ?? root?.pointRecords ?? root?.rewardHistory ?? [];
-      const localStudyRecords = readLocalArray(STUDY_RECORDS_KEY);
       const localPointHistory = readLocalArray(POINT_HISTORY_KEY);
-      const mergedStudyRecords = mergeEntries(remoteStudyRecords, localStudyRecords);
       const mergedPointHistory = mergeEntries(remotePointHistory, localPointHistory);
       const savedPointValue = window.localStorage.getItem(CURRENT_POINTS_KEY);
       const historyBalance = Math.max(
@@ -138,7 +132,6 @@ export default function Home() {
         savedPoints;
 
       setProblems(sortProblemsByPage(Array.isArray(problemList) ? problemList : []));
-      setStudyRecords(mergedStudyRecords);
       setPointHistory(mergedPointHistory);
       setCurrentPoints(loadedPoints);
       setDailyStats(
@@ -147,7 +140,6 @@ export default function Home() {
           : {}
       );
       setPointLogs(Array.isArray(root?.pointLogs) ? root.pointLogs : []);
-      writeLocalValue(STUDY_RECORDS_KEY, mergedStudyRecords);
       writeLocalValue(POINT_HISTORY_KEY, mergedPointHistory);
       window.localStorage.setItem(CURRENT_POINTS_KEY, String(loadedPoints));
     } catch (e) {
@@ -247,12 +239,14 @@ export default function Home() {
   // ProblemSolver에서 O/X 채점 시 호출: 구글 시트로 결과 전송 + 로컬 복습 스케줄 갱신 + 상태 갱신
   const handleGrade = async (problem, isCorrect, canvasImage, solveTimeSec) => {
     // code는 학습기록 B열 콘텐츠 코드에 필요하므로 현재 문제에서 직접 전달한다.
+    // userName은 학생별로 학습 기록/포인트를 분리해서 저장하기 위해 함께 전달한다.
     const response = await submitGrade(
       problem.rowNumber,
       isCorrect,
       problem.code,
       canvasImage,
-      solveTimeSec
+      solveTimeSec,
+      userInfo?.name
     );
     const responseRoot = getPayloadRoot(response);
     const submittedUrl =
@@ -274,19 +268,6 @@ export default function Home() {
       explicitEarnedPoints ?? (responseBalance == null ? 0 : Math.max(0, responseBalance - currentPoints));
     const studiedAt =
       responseRoot?.studiedAt ?? responseRoot?.createdAt ?? new Date().toISOString();
-    const localRecord = {
-      ...(responseRoot?.studyRecord ?? {}),
-      id:
-        responseRoot?.studyRecord?.id ??
-        `study-${problem.rowNumber}-${Date.now()}`,
-      studyDate: responseRoot?.studyRecord?.studyDate ?? studiedAt,
-      studiedAt,
-      rowNumber: problem.rowNumber,
-      code: problem.code,
-      isCorrect,
-      solveTimeSec,
-      pointsEarned,
-    };
 
     recordAttempt(problem.rowNumber, isCorrect);
     setProblems((prev) =>
@@ -300,11 +281,6 @@ export default function Home() {
           : p
       )
     );
-    setStudyRecords((prev) => {
-      const next = mergeEntries(localRecord, prev);
-      writeLocalValue(STUDY_RECORDS_KEY, next);
-      return next;
-    });
 
     if (pointsEarned > 0) {
       const pointEntry = {
@@ -336,7 +312,7 @@ export default function Home() {
   };
 
   const handleRedeemPoints = async (item, amount) => {
-    const response = await redeemPoints(item, amount);
+    const response = await redeemPoints(item, amount, userInfo?.name);
     const responseRoot = getPayloadRoot(response);
     const nextBalance =
       getNumericValue(responseRoot, [
@@ -419,6 +395,7 @@ export default function Home() {
         {!loading && !error && activeTab === 'solver' && (
           <ProblemSolver
             queue={solverQueue}
+            setQueue={setSolverQueue}
             index={solverIndex}
             setIndex={setSolverIndex}
             onGrade={handleGrade}
@@ -427,7 +404,7 @@ export default function Home() {
           />
         )}
         {!loading && !error && activeTab === 'planner' && (
-          <MonthlyPlanner studyRecords={studyRecords} />
+          <MonthlyPlanner dailyStats={dailyStats} />
         )}
         {!loading && !error && activeTab === 'store' && (
           <RewardStore

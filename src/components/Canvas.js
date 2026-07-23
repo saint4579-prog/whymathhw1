@@ -2,7 +2,7 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 
-const Canvas = forwardRef(function Canvas({ disabled = false }, ref) {
+const Canvas = forwardRef(function Canvas({ disabled = false, onDrawEnd }, ref) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const isDrawingRef = useRef(false);
@@ -153,7 +153,9 @@ const Canvas = forwardRef(function Canvas({ disabled = false }, ref) {
 
   const stopDrawing = (event) => {
     if (event.pointerType === 'touch') return;
+    const wasDrawing = isDrawingRef.current;
     isDrawingRef.current = false;
+    if (wasDrawing) onDrawEnd?.(hasContentRef.current);
   };
 
   return (

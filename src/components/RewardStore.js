@@ -1,21 +1,9 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { toISODate } from '@/lib/dateUtils';
 
 const DEFAULT_PARENT_PIN = '1234';
-
-// dailyStats의 날짜 키는 "Thu Jul 23"처럼 연도가 빠진 형태로 내려오므로,
-// 화면/정렬용 "YYYY-MM-DD"로 바꿀 때는 현재 연도를 붙여서 파싱한다.
-function toISODate(value) {
-  if (!value) return null;
-  const hasYear = /\d{4}/.test(String(value));
-  const date = new Date(hasYear ? value : `${value} ${new Date().getFullYear()}`);
-  if (Number.isNaN(date.getTime())) return null;
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
 
 function formatDate(value) {
   const iso = toISODate(value);
