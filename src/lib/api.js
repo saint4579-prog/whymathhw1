@@ -17,6 +17,7 @@ export async function submitGrade(rowNumber, isCorrect, code, canvasImage, solve
   const res = await fetch(API_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    redirect: 'follow',
     body: JSON.stringify({
       rowNumber,
       isCorrect,
@@ -37,6 +38,7 @@ export async function redeemPoints(item, amount) {
   const res = await fetch(API_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    redirect: 'follow',
     body: JSON.stringify({
       type: 'REDEEM_POINT',
       item,
