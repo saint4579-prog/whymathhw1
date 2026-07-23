@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npm view *)",
+      "Bash(npm audit *)",
+      "Bash(npm run *)",
+      "Bash(curl -s \"https://script.google.com/macros/s/AKfycbz9qdyqPLpDUHthPDpnynv0uSivgayGtMbOSfFdFLQNlqtpS_swx7eWug6i0orQsvtw/exec\")",
+      "Bash(curl -sL \"https://script.google.com/macros/s/AKfycbz9qdyqPLpDUHthPDpnynv0uSivgayGtMbOSfFdFLQNlqtpS_swx7eWug6i0orQsvtw/exec\")",
+      "Bash(curl -sIL \"https://drive.google.com/uc?export=view&id=1-btY_IuE8cs6UG_GFTEiwx8rjimGu5JD\")",
+      "Bash(curl -sI \"https://lh3.googleusercontent.com/d/1-btY_IuE8cs6UG_GFTEiwx8rjimGu5JD=s1600\")",
+      "Bash(node -e ' *)",
+      "Bash(curl -sI \"https://lh3.googleusercontent.com/d/1HG80M4Ir2UmV6lKGpSDFYs97D0HyiU1T=s1600\")"
+    ]
+  }
+}
