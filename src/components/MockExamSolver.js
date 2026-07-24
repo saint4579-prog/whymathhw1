@@ -124,6 +124,8 @@ export default function MockExamSolver({ queue, setQueue, index, setIndex, onGra
   const isSolving = phase === PHASE.SOLVING;
   const isLastInQueue = index >= queue.length - 1;
 
+  // 채점 화면에서 읽기 전용으로 보여줄, 아이가 쓴 풀이(저장된 캔버스 PNG dataURL).
+  const myDrawing = problemKey ? savedDrawingsRef.current[problemKey] ?? null : null;
   const questionImageUrl = toViewableImageUrl(problem?.questionImageUrl);
   const answerImageUrl = toViewableImageUrl(problem?.answerImageUrl);
   const explanationImageUrl = problem?.explanationImageUrl
@@ -151,15 +153,17 @@ export default function MockExamSolver({ queue, setQueue, index, setIndex, onGra
     return () => window.clearInterval(timerId);
   }, [problemKey, phase]);
 
-  // 문제/단계 전환 직전(SOLVING이었을 때만) 캔버스와 풀이 시간을 저장하고,
-  // 전환된 문제의 저장된 그림을 복원한다. 문제가 바뀌면 힌트 단계도 초기화한다.
+  // SOLVING 화면과 GRADING 화면은 서로 다른 <Canvas> 요소를 쓴다.
+  // 그래서 SOLVING→GRADING 전환 시점에 캔버스를 저장하려 하면, 이미 새로 마운트된
+  // (빈) GRADING 캔버스를 읽어 방금 쓴 풀이를 덮어써 버린다.
+  // → 저장/복원은 "풀이 중 다른 문제로 넘어갈 때(SOLVING→SOLVING)"에만 한다.
+  //   SOLVING→GRADING 전환 시의 저장은 enterGrading에서 이미 처리한다.
   useLayoutEffect(() => {
     const previousKey = activeKeyRef.current;
     const previousPhase = activePhaseRef.current;
-    const wasSolving = previousPhase === PHASE.SOLVING;
-    const transitioned = previousKey !== problemKey || previousPhase !== phase;
+    const stillSolving = previousPhase === PHASE.SOLVING && phase === PHASE.SOLVING;
 
-    if (wasSolving && transitioned && previousKey) {
+    if (stillSolving && previousKey && previousKey !== problemKey) {
       const dataURL = canvasRef.current?.getDataURL() ?? null;
       setSavedDrawing(previousKey, dataURL);
       const timeSec = Math.max(1, Math.floor((Date.now() - solveStartRef.current) / 1000));
@@ -169,9 +173,12 @@ export default function MockExamSolver({ queue, setQueue, index, setIndex, onGra
     activeKeyRef.current = problemKey;
     activePhaseRef.current = phase;
 
-    const sourceDataURL = problemKey ? savedDrawingsRef.current[problemKey] ?? null : null;
-    canvasRef.current?.restore(sourceDataURL);
-    setHasCanvasContent(Boolean(sourceDataURL));
+    // 풀이 중일 때만 저장된 그림을 캔버스에 복원한다. (채점 화면은 img로 보여주므로 캔버스를 건드리지 않는다.)
+    if (phase === PHASE.SOLVING) {
+      const sourceDataURL = problemKey ? savedDrawingsRef.current[problemKey] ?? null : null;
+      canvasRef.current?.restore(sourceDataURL);
+      setHasCanvasContent(Boolean(sourceDataURL));
+    }
     setHintLevel(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [problemKey, phase]);
@@ -424,8 +431,17 @@ export default function MockExamSolver({ queue, setQueue, index, setIndex, onGra
                 <p className="text-amber-400">문제 이미지가 없습니다.</p>
               )}
             </section>
-            <section className="relative min-h-[240px] overflow-hidden rounded-3xl">
-              <Canvas ref={canvasRef} disabled />
+            <section className="relative flex min-h-[240px] items-center justify-center overflow-auto rounded-3xl border-4 border-dashed border-rose-200 bg-white p-2">
+              {myDrawing ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={myDrawing}
+                  alt="내가 쓴 풀이"
+                  className="max-h-[38vh] max-w-full object-contain"
+                />
+              ) : (
+                <p className="text-sm font-semibold text-stone-400">✏️ 쓴 풀이가 없어요</p>
+              )}
               <span className="absolute right-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-bold text-stone-500 shadow-sm">
                 ✏️ 내가 쓴 풀이
               </span>
