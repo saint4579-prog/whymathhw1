@@ -56,8 +56,8 @@ export default function UserRegistration({ onSubmit }) {
             <CharacterMascot name="penguin" height={50} delay={0} />
             <CharacterMascot name="frog" height={54} delay={160} />
             <CharacterMascot name="chick" height={58} delay={320} />
-            <CharacterMascot name="fox" height={54} delay={480} />
-            <CharacterMascot name="dog" height={50} delay={640} />
+            <CharacterMascot name="cat" height={54} delay={480} />
+            <CharacterMascot name="fox" height={50} delay={640} />
           </div>
           <h1 className="mt-3 text-xl font-extrabold text-stone-700">
             이름을 입력하고 시작해요!

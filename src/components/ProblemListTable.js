@@ -61,7 +61,7 @@ export default function ProblemListTable({
   if (problems.length === 0) {
     return (
       <div className="flex flex-col items-center gap-3 py-16">
-        <CharacterMascot name="penguin" height={70} animate="wiggle" />
+        <CharacterMascot name="sloth" height={70} animate="wiggle" />
         <p className="text-center text-amber-500">🐾 {emptyMessage}</p>
       </div>
     );

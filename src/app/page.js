@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Header from '@/components/Header';
 import Dashboard from '@/components/Dashboard';
 import WrongNotebook from '@/components/WrongNotebook';
@@ -8,17 +8,22 @@ import ReviewMode from '@/components/ReviewMode';
 import ProblemSolver from '@/components/ProblemSolver';
 import MonthlyPlanner from '@/components/MonthlyPlanner';
 import RewardStore from '@/components/RewardStore';
+import CharacterCollection from '@/components/CharacterCollection';
+import LevelUpModal from '@/components/LevelUpModal';
 import UserRegistration from '@/components/UserRegistration';
 import CharacterMascot from '@/components/CharacterMascot';
 import { fetchProblems, redeemPoints, registerUser, submitGrade } from '@/lib/api';
 import { toISODate } from '@/lib/dateUtils';
 import { getPointsForAnswer } from '@/lib/points';
+import { getCollectionState } from '@/lib/levels';
 import { sortProblemsByPage } from '@/lib/problemUtils';
 import { recordAttempt } from '@/lib/reviewSchedule';
 
 const POINT_HISTORY_KEY = 'dog-math-point-history';
 const CURRENT_POINTS_KEY = 'dog-math-current-points';
 const USER_INFO_KEY = 'userInfo';
+// 마지막으로 축하 모달을 보여준 레벨. 여기에 저장된 값보다 레벨이 오르면 레벨업 모달을 띄운다.
+const LEVEL_SEEN_KEY = 'dog-math-level-seen';
 
 function readLocalArray(key) {
   try {
@@ -113,6 +118,60 @@ export default function Home() {
 
   // 전체 현황판의 "오늘의 학습 목표" 체크박스 선택 상태 (rowNumber 집합)
   const [selectedRows, setSelectedRows] = useState(new Set());
+
+  // 레벨업 축하 모달로 보여줄, 이번에 새로 얻은 캐릭터 정보. null이면 표시 안 함.
+  const [levelUp, setLevelUp] = useState(null);
+
+  // 그동안 모은(누적) 포인트 = 날짜별 학습 통계(dailyStats)의 pointsEarned 총합.
+  // 현재 잔액이 아니라 누적값이라, 선물로 포인트를 차감해도 레벨/캐릭터는 줄지 않는다.
+  const totalEarnedPoints = useMemo(
+    () =>
+      Object.values(dailyStats).reduce(
+        (sum, stat) => sum + (Number(stat?.pointsEarned) || 0),
+        0
+      ),
+    [dailyStats]
+  );
+  const collection = useMemo(
+    () => getCollectionState(totalEarnedPoints),
+    [totalEarnedPoints]
+  );
+
+  // 누적 포인트가 늘어 레벨이 오르면 축하 모달을 띄운다.
+  // 최초 로딩 시점 레벨은 기준선으로 저장만 하고(모달 없이), 이후 상승분에만 반응한다.
+  useEffect(() => {
+    if (!userInfo || loading) return;
+    let seen = null;
+    try {
+      const raw = window.localStorage.getItem(LEVEL_SEEN_KEY);
+      if (raw != null && raw !== '') seen = Number(raw);
+    } catch {
+      seen = null;
+    }
+
+    if (seen == null || Number.isNaN(seen)) {
+      // 이 브라우저에서 처음 확인하는 순간: 지금 레벨을 기준선으로만 저장한다.
+      try {
+        window.localStorage.setItem(LEVEL_SEEN_KEY, String(collection.level));
+      } catch {
+        // 저장 실패는 무시 (다음 상승 때 다시 시도)
+      }
+      return;
+    }
+
+    if (collection.level > seen) {
+      // seen 다음 칸부터 현재 레벨까지가 이번에 새로 해금된 캐릭터들이다.
+      const newNames = collection.characters
+        .slice(seen, collection.level)
+        .map((entry) => entry.name);
+      setLevelUp({ level: collection.level, names: newNames });
+      try {
+        window.localStorage.setItem(LEVEL_SEEN_KEY, String(collection.level));
+      } catch {
+        // 저장 실패는 무시
+      }
+    }
+  }, [userInfo, loading, collection]);
 
   const loadProblems = useCallback(async () => {
     setLoading(true);
@@ -399,12 +458,13 @@ export default function Home() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         currentPoints={currentPoints}
+        level={collection.level}
       />
       <div className="p-4 md:p-6">
         {loading && (
           <div className="flex flex-col items-center gap-4 py-20">
             <div className="flex items-end gap-3">
-              <CharacterMascot name="dog" height={56} delay={0} />
+              <CharacterMascot name="hedgehog" height={56} delay={0} />
               <CharacterMascot name="chick" height={64} delay={200} />
               <CharacterMascot name="penguin" height={56} delay={400} />
             </div>
@@ -470,7 +530,19 @@ export default function Home() {
             onRedeem={handleRedeemPoints}
           />
         )}
+        {!loading && !error && activeTab === 'collection' && (
+          <CharacterCollection totalEarned={totalEarnedPoints} />
+        )}
       </div>
+
+      {/* 레벨업 축하 모달: 문제 풀이(채점) 중에는 방해되지 않도록 미루고, 그 외 화면에서 보여준다. */}
+      {levelUp && activeTab !== 'solver' && (
+        <LevelUpModal
+          level={levelUp.level}
+          names={levelUp.names}
+          onClose={() => setLevelUp(null)}
+        />
+      )}
     </main>
   );
 }
