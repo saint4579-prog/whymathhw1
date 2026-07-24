@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import CharacterMascot from './CharacterMascot';
 
 const GENDER_OPTIONS = [
   { value: '', label: '선택' },
@@ -51,7 +52,13 @@ export default function UserRegistration({ onSubmit }) {
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-amber-50 via-rose-50/40 to-amber-50 p-4">
       <div className="w-full max-w-md rounded-[2rem] border-4 border-white bg-white p-6 shadow-2xl shadow-amber-100/70 sm:p-8">
         <div className="mb-6 text-center">
-          <p className="text-4xl">🐶🐾</p>
+          <div className="flex items-end justify-center gap-1.5">
+            <CharacterMascot name="penguin" height={50} delay={0} />
+            <CharacterMascot name="frog" height={54} delay={160} />
+            <CharacterMascot name="chick" height={58} delay={320} />
+            <CharacterMascot name="fox" height={54} delay={480} />
+            <CharacterMascot name="dog" height={50} delay={640} />
+          </div>
           <h1 className="mt-3 text-xl font-extrabold text-stone-700">
             이름을 입력하고 시작해요!
           </h1>

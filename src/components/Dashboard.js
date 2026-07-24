@@ -4,10 +4,25 @@ import { useMemo, useState } from 'react';
 import ProblemListTable from './ProblemListTable';
 import { isSolved, extractPageNumber } from '@/lib/problemUtils';
 import { buildHintResultMessage, prepareGeminiHint } from '@/lib/geminiPrompt';
+import { CHARACTERS } from '@/lib/characters';
+import CharacterMascot from './CharacterMascot';
 
-function SummaryCard({ label, value }) {
+function SummaryCard({ label, value, character }) {
+  const theme = character ? CHARACTERS[character] : null;
   return (
-    <div className="rounded-3xl border-2 border-rose-100 bg-white p-4 text-center shadow-lg shadow-amber-100/60">
+    <div
+      className={`relative overflow-hidden rounded-3xl border-2 bg-white p-4 text-center shadow-lg ${
+        theme ? `${theme.ring} ${theme.glow}` : 'border-rose-100 shadow-amber-100/60'
+      }`}
+    >
+      {character && (
+        <CharacterMascot
+          name={character}
+          height={46}
+          animate="none"
+          className="absolute -right-1 -top-1 opacity-90"
+        />
+      )}
       <p className="mb-1 text-xs font-semibold text-amber-500">{label}</p>
       <p className="text-2xl font-extrabold text-stone-700">{value}</p>
     </div>
@@ -100,9 +115,9 @@ export default function Dashboard({
     <div className="mx-auto max-w-6xl">
       <div className="sticky top-[var(--app-header-height)] z-20 -mx-4 mb-4 space-y-3 bg-gradient-to-b from-amber-50 via-amber-50/95 to-amber-50/80 px-4 pb-3 pt-1 backdrop-blur md:-mx-6 md:px-6">
         <div className="grid grid-cols-3 gap-3">
-          <SummaryCard label="전체 문제" value={total} />
-          <SummaryCard label="풀이 완료" value={solvedCount} />
-          <SummaryCard label="정답 수" value={correctCount} />
+          <SummaryCard label="전체 문제" value={total} character="elephant" />
+          <SummaryCard label="풀이 완료" value={solvedCount} character="chick" />
+          <SummaryCard label="정답 수" value={correctCount} character="fox" />
         </div>
 
         <div className="rounded-3xl border-2 border-rose-100 bg-white p-3 shadow-lg shadow-amber-100/60">

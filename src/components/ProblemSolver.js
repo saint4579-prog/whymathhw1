@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Canvas from './Canvas';
 import { toViewableImageUrl } from '@/lib/api';
 import { buildHintResultMessage, prepareGeminiHint } from '@/lib/geminiPrompt';
+import CharacterMascot from './CharacterMascot';
 
 const LAYOUT_MODE_KEY = 'problem-solver-layout-mode';
 const PHASE = { SOLVING: 'SOLVING', GRADING: 'GRADING' };
@@ -172,7 +173,13 @@ function CelebrationModal({ onClose }) {
       aria-label="채점 완료"
     >
       <div className="w-full max-w-sm rounded-[2rem] border-4 border-white bg-gradient-to-b from-amber-50 to-rose-50 p-6 text-center shadow-2xl">
-        <p className="text-6xl">🎉🐶🦴</p>
+        <p className="text-4xl">🎉</p>
+        <div className="mt-1 flex items-end justify-center gap-1">
+          <CharacterMascot name="frog" height={56} delay={0} />
+          <CharacterMascot name="chick" height={64} delay={140} />
+          <CharacterMascot name="fox" height={64} delay={280} />
+          <CharacterMascot name="penguin" height={56} delay={420} />
+        </div>
         <h2 className="mt-3 text-xl font-extrabold text-stone-700">오늘 채점 끝! 정말 잘했어요!</h2>
         <p className="mt-2 text-sm font-semibold text-stone-500">멍멍이가 오늘도 열심히 도와줬어요 🐾</p>
         <button

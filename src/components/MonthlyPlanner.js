@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { toISODate } from '@/lib/dateUtils';
+import CharacterMascot from './CharacterMascot';
 
 function toCalendarDateKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
@@ -118,9 +119,12 @@ export default function MonthlyPlanner({ dailyStats = {} }) {
   return (
     <div className="mx-auto max-w-7xl">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-3xl border-2 border-rose-100 bg-white p-4 shadow-lg shadow-amber-100/60">
-        <div>
-          <p className="text-xs font-bold text-rose-400">🐾 하루하루 쌓이는 나의 공부 발자국</p>
-          <h2 className="text-2xl font-extrabold text-stone-700">📅 월간 스터디 플래너</h2>
+        <div className="flex items-center gap-3">
+          <CharacterMascot name="elephant" height={54} />
+          <div>
+            <p className="text-xs font-bold text-rose-400">🐾 하루하루 쌓이는 나의 공부 발자국</p>
+            <h2 className="text-2xl font-extrabold text-stone-700">📅 월간 스터디 플래너</h2>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button

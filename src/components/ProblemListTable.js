@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { isSolved } from '@/lib/problemUtils';
 import ProblemDetailModal from './ProblemDetailModal';
 import ProblemHistoryModal from './ProblemHistoryModal';
+import CharacterMascot from './CharacterMascot';
 
 function StatusBadge({ problem }) {
   if (!isSolved(problem)) {
@@ -58,7 +59,12 @@ export default function ProblemListTable({
   const [historyProblem, setHistoryProblem] = useState(null);
 
   if (problems.length === 0) {
-    return <p className="py-16 text-center text-amber-500">🐾 {emptyMessage}</p>;
+    return (
+      <div className="flex flex-col items-center gap-3 py-16">
+        <CharacterMascot name="penguin" height={70} animate="wiggle" />
+        <p className="text-center text-amber-500">🐾 {emptyMessage}</p>
+      </div>
+    );
   }
 
   const allSelected = selectable && problems.length > 0 && problems.every((p) => selectedRows.has(p.rowNumber));

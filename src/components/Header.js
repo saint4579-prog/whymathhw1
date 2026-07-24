@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import CharacterMascot from './CharacterMascot';
 
 const TABS = [
   { key: 'dashboard', label: '📊 전체 현황판' },
@@ -39,8 +40,9 @@ export default function Header({ activeTab, setActiveTab, currentPoints = 0 }) {
       className="sticky top-0 z-30 border-b-4 border-rose-100 bg-amber-50/95 shadow-lg shadow-amber-100/60 backdrop-blur"
     >
       <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-        <h1 className="text-lg font-extrabold text-rose-500 sm:text-xl">
-          🐶 멍멍! 나의 강아지 수학 복습 다이어리 🐾
+        <h1 className="flex items-center gap-2 text-lg font-extrabold text-rose-500 sm:text-xl">
+          <CharacterMascot name="dog" height={36} animate="wiggle" />
+          <span>🐶 멍멍! 나의 강아지 수학 복습 다이어리 🐾</span>
         </h1>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <span className="rounded-full border-2 border-white bg-yellow-300 px-4 py-2 text-sm font-black text-amber-900 shadow-md shadow-amber-200">

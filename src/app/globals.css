@@ -10,3 +10,41 @@ html,
 body {
   height: 100%;
 }
+
+/* 동물 캐릭터 마스코트 장식용 애니메이션 (CharacterMascot에서 사용) */
+@keyframes mascot-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-7px);
+  }
+}
+
+@keyframes mascot-wiggle {
+  0%,
+  100% {
+    transform: rotate(-5deg);
+  }
+  50% {
+    transform: rotate(5deg);
+  }
+}
+
+.animate-mascot-bob {
+  animation: mascot-bob 3s ease-in-out infinite;
+}
+
+.animate-mascot-wiggle {
+  animation: mascot-wiggle 2.6s ease-in-out infinite;
+  transform-origin: 50% 85%;
+}
+
+/* 멀미를 유발하지 않도록, 사용자가 움직임 최소화를 켜면 마스코트도 멈춘다. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-mascot-bob,
+  .animate-mascot-wiggle {
+    animation: none;
+  }
+}

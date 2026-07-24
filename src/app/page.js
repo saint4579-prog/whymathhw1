@@ -9,6 +9,7 @@ import ProblemSolver from '@/components/ProblemSolver';
 import MonthlyPlanner from '@/components/MonthlyPlanner';
 import RewardStore from '@/components/RewardStore';
 import UserRegistration from '@/components/UserRegistration';
+import CharacterMascot from '@/components/CharacterMascot';
 import { fetchProblems, redeemPoints, registerUser, submitGrade } from '@/lib/api';
 import { toISODate } from '@/lib/dateUtils';
 import { getPointsForAnswer } from '@/lib/points';
@@ -400,9 +401,21 @@ export default function Home() {
         currentPoints={currentPoints}
       />
       <div className="p-4 md:p-6">
-        {loading && <p className="py-20 text-center text-lg text-amber-700">🐾 강아지가 문제를 물어오는 중... 🐶</p>}
+        {loading && (
+          <div className="flex flex-col items-center gap-4 py-20">
+            <div className="flex items-end gap-3">
+              <CharacterMascot name="dog" height={56} delay={0} />
+              <CharacterMascot name="chick" height={64} delay={200} />
+              <CharacterMascot name="penguin" height={56} delay={400} />
+            </div>
+            <p className="text-lg text-amber-700">🐾 강아지가 문제를 물어오는 중... 🐶</p>
+          </div>
+        )}
         {!loading && error && (
           <div className="py-20 text-center">
+            <div className="mb-3 flex justify-center">
+              <CharacterMascot name="raccoon" height={72} animate="wiggle" />
+            </div>
             <p className="mb-3 text-rose-500">🐶 앗, 문제를 가져오지 못했어요. {error}</p>
             <button
               type="button"

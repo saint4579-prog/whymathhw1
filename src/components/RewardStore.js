@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { toISODate } from '@/lib/dateUtils';
+import CharacterMascot from './CharacterMascot';
 
 const DEFAULT_PARENT_PIN = '1234';
 
@@ -206,7 +207,10 @@ export default function RewardStore({ currentPoints = 0, dailyStats = {}, pointL
     <div className="mx-auto max-w-6xl">
       <div className="mb-5 overflow-hidden rounded-[2rem] border-4 border-white bg-gradient-to-r from-amber-200 via-yellow-100 to-rose-100 p-6 shadow-xl shadow-amber-100">
         <div className="flex flex-wrap items-center gap-4">
-          <div className="text-5xl">🐶🎁</div>
+          <div className="flex items-center gap-1">
+            <CharacterMascot name="raccoon" height={60} animate="wiggle" />
+            <span className="text-4xl">🎁</span>
+          </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-extrabold text-rose-500">공부해서 모은 나의 보물</p>
             <h2 className="text-2xl font-extrabold text-stone-700">포인트 보상 상점</h2>
