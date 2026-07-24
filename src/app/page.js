@@ -8,13 +8,16 @@ import ReviewMode from '@/components/ReviewMode';
 import ProblemSolver from '@/components/ProblemSolver';
 import MonthlyPlanner from '@/components/MonthlyPlanner';
 import RewardStore from '@/components/RewardStore';
-import { fetchProblems, redeemPoints, submitGrade } from '@/lib/api';
+import UserRegistration from '@/components/UserRegistration';
+import { fetchProblems, redeemPoints, registerUser, submitGrade } from '@/lib/api';
+import { toISODate } from '@/lib/dateUtils';
+import { getPointsForAnswer } from '@/lib/points';
 import { sortProblemsByPage } from '@/lib/problemUtils';
 import { recordAttempt } from '@/lib/reviewSchedule';
 
-const STUDY_RECORDS_KEY = 'dog-math-study-records';
 const POINT_HISTORY_KEY = 'dog-math-point-history';
 const CURRENT_POINTS_KEY = 'dog-math-current-points';
+const USER_INFO_KEY = 'userInfo';
 
 function readLocalArray(key) {
   try {
@@ -81,14 +84,25 @@ function getPointDelta(entry) {
     : amount;
 }
 
+function getLocalDateKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate()
+  ).padStart(2, '0')}`;
+}
+
 export default function Home() {
+  // undefined: 아직 localStorage 확인 전, null: 미등록(등록 화면 노출), object: 등록 완료
+  const [userInfo, setUserInfo] = useState(undefined);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [problems, setProblems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [studyRecords, setStudyRecords] = useState([]);
   const [pointHistory, setPointHistory] = useState([]);
   const [currentPoints, setCurrentPoints] = useState(0);
+  // 보상 상점 화면용 원본 데이터: 백엔드가 실제로 내려주는 필드는
+  // dailyStats(날짜별 학습 통계)와 pointLogs(엄마가 차감한 내역)이다.
+  const [dailyStats, setDailyStats] = useState({});
+  const [pointLogs, setPointLogs] = useState([]);
 
   // 현재 풀이 세션(문제풀기 탭)에서 순회할 문제 목록과 인덱스.
   // 어느 탭에서 [풀기]를 눌렀는지에 따라 전체 목록/오답노트/망각곡선 복습/오늘의 학습 목표 중 하나가 들어간다.
@@ -110,13 +124,9 @@ export default function Home() {
         : Array.isArray(payload?.data)
           ? payload.data
           : root?.problems ?? root?.items ?? [];
-      const remoteStudyRecords =
-        root?.studyRecords ?? root?.learningRecords ?? root?.studyHistory ?? [];
       const remotePointHistory =
         root?.pointHistory ?? root?.pointRecords ?? root?.rewardHistory ?? [];
-      const localStudyRecords = readLocalArray(STUDY_RECORDS_KEY);
       const localPointHistory = readLocalArray(POINT_HISTORY_KEY);
-      const mergedStudyRecords = mergeEntries(remoteStudyRecords, localStudyRecords);
       const mergedPointHistory = mergeEntries(remotePointHistory, localPointHistory);
       const savedPointValue = window.localStorage.getItem(CURRENT_POINTS_KEY);
       const historyBalance = Math.max(
@@ -130,10 +140,14 @@ export default function Home() {
         savedPoints;
 
       setProblems(sortProblemsByPage(Array.isArray(problemList) ? problemList : []));
-      setStudyRecords(mergedStudyRecords);
       setPointHistory(mergedPointHistory);
       setCurrentPoints(loadedPoints);
-      writeLocalValue(STUDY_RECORDS_KEY, mergedStudyRecords);
+      setDailyStats(
+        root?.dailyStats && typeof root.dailyStats === 'object' && !Array.isArray(root.dailyStats)
+          ? root.dailyStats
+          : {}
+      );
+      setPointLogs(Array.isArray(root?.pointLogs) ? root.pointLogs : []);
       writeLocalValue(POINT_HISTORY_KEY, mergedPointHistory);
       window.localStorage.setItem(CURRENT_POINTS_KEY, String(loadedPoints));
     } catch (e) {
@@ -143,9 +157,35 @@ export default function Home() {
     }
   }, []);
 
+  // 최초 접속 시 1회만 사용자 등록을 받는다: localStorage에 userInfo가 있으면 바로 메인 화면으로 진입한다.
   useEffect(() => {
-    loadProblems();
-  }, [loadProblems]);
+    try {
+      const raw = window.localStorage.getItem(USER_INFO_KEY);
+      setUserInfo(raw ? JSON.parse(raw) : null);
+    } catch {
+      setUserInfo(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (userInfo) loadProblems();
+  }, [loadProblems, userInfo]);
+
+  const handleRegisterUser = async ({ grade, name, gender }) => {
+    const response = await registerUser(grade, name, gender);
+    const responseRoot = getPayloadRoot(response);
+    const data = {
+      grade,
+      name,
+      gender,
+      registeredAt: new Date().toISOString(),
+      ...(responseRoot && typeof responseRoot === 'object' && !Array.isArray(responseRoot)
+        ? responseRoot
+        : {}),
+    };
+    window.localStorage.setItem(USER_INFO_KEY, JSON.stringify(data));
+    setUserInfo(data);
+  };
 
   const startSolving = (list, rowNumber, label) => {
     const startIndex = rowNumber == null ? 0 : Math.max(list.findIndex((p) => p.rowNumber === rowNumber), 0);
@@ -180,10 +220,18 @@ export default function Home() {
     });
   };
 
-  const toggleAllRows = () => {
+  const toggleAllRows = (rowNumbers) => {
+    const targetRows = Array.isArray(rowNumbers)
+      ? rowNumbers
+      : problems.map((problem) => problem.rowNumber);
     setSelectedRows((prev) => {
-      const allSelected = problems.length > 0 && problems.every((p) => prev.has(p.rowNumber));
-      return allSelected ? new Set() : new Set(problems.map((p) => p.rowNumber));
+      const next = new Set(prev);
+      const allSelected = targetRows.length > 0 && targetRows.every((rowNumber) => prev.has(rowNumber));
+      targetRows.forEach((rowNumber) => {
+        if (allSelected) next.delete(rowNumber);
+        else next.add(rowNumber);
+      });
+      return next;
     });
   };
 
@@ -207,12 +255,14 @@ export default function Home() {
   // ProblemSolver에서 O/X 채점 시 호출: 구글 시트로 결과 전송 + 로컬 복습 스케줄 갱신 + 상태 갱신
   const handleGrade = async (problem, isCorrect, canvasImage, solveTimeSec) => {
     // code는 학습기록 B열 콘텐츠 코드에 필요하므로 현재 문제에서 직접 전달한다.
+    // userName은 학생별로 학습 기록/포인트를 분리해서 저장하기 위해 함께 전달한다.
     const response = await submitGrade(
       problem.rowNumber,
       isCorrect,
       problem.code,
       canvasImage,
-      solveTimeSec
+      solveTimeSec,
+      userInfo?.name
     );
     const responseRoot = getPayloadRoot(response);
     const submittedUrl =
@@ -231,21 +281,17 @@ export default function Home() {
       getNumericValue(responseRoot, ['pointsEarned', 'earnedPoints', 'rewardPoints']) ??
       getNumericValue(responseRoot?.pointRecord, ['amount', 'points']);
     const pointsEarned =
-      explicitEarnedPoints ?? (responseBalance == null ? 0 : Math.max(0, responseBalance - currentPoints));
+      explicitEarnedPoints ??
+      (responseBalance == null
+        ? getPointsForAnswer(isCorrect)
+        : Math.max(0, responseBalance - currentPoints));
     const studiedAt =
       responseRoot?.studiedAt ?? responseRoot?.createdAt ?? new Date().toISOString();
-    const localRecord = {
-      ...(responseRoot?.studyRecord ?? {}),
-      id:
-        responseRoot?.studyRecord?.id ??
-        `study-${problem.rowNumber}-${Date.now()}`,
-      studyDate: responseRoot?.studyRecord?.studyDate ?? studiedAt,
-      studiedAt,
-      rowNumber: problem.rowNumber,
-      code: problem.code,
+    const historyLog = {
+      date: studiedAt,
       isCorrect,
+      imageUrl: submittedUrl || '',
       solveTimeSec,
-      pointsEarned,
     };
 
     recordAttempt(problem.rowNumber, isCorrect);
@@ -256,14 +302,26 @@ export default function Home() {
               ...p,
               submitted: submittedUrl || p.submitted || true,
               isCorrect,
+              reviewCount: (Number(p.reviewCount) || 0) + 1,
+              historyLogs: [...(Array.isArray(p.historyLogs) ? p.historyLogs : []), historyLog],
             }
           : p
       )
     );
-    setStudyRecords((prev) => {
-      const next = mergeEntries(localRecord, prev);
-      writeLocalValue(STUDY_RECORDS_KEY, next);
-      return next;
+    setDailyStats((prev) => {
+      const todayKey = getLocalDateKey();
+      const existingKey =
+        Object.keys(prev).find((key) => toISODate(key) === todayKey) ?? todayKey;
+      const previousStat = prev[existingKey] ?? {};
+      return {
+        ...prev,
+        [existingKey]: {
+          ...previousStat,
+          solvedCount: (Number(previousStat.solvedCount) || 0) + 1,
+          totalTimeSec: (Number(previousStat.totalTimeSec) || 0) + solveTimeSec,
+          pointsEarned: (Number(previousStat.pointsEarned) || 0) + pointsEarned,
+        },
+      };
     });
 
     if (pointsEarned > 0) {
@@ -296,7 +354,7 @@ export default function Home() {
   };
 
   const handleRedeemPoints = async (item, amount) => {
-    const response = await redeemPoints(item, amount);
+    const response = await redeemPoints(item, amount, userInfo?.name);
     const responseRoot = getPayloadRoot(response);
     const nextBalance =
       getNumericValue(responseRoot, [
@@ -322,8 +380,17 @@ export default function Home() {
       writeLocalValue(POINT_HISTORY_KEY, next);
       return next;
     });
+    setPointLogs((prev) => [pointEntry, ...prev]);
     return response;
   };
+
+  // 등록 여부 확인 전에는 아무것도 그리지 않아 깜빡임을 막는다.
+  if (userInfo === undefined) return null;
+
+  // userInfo가 없으면(미등록) 메인 앱을 숨기고 등록 화면만 전체 화면으로 보여준다.
+  if (userInfo === null) {
+    return <UserRegistration onSubmit={handleRegisterUser} />;
+  }
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-amber-50 via-rose-50/40 to-amber-50 pb-10">
@@ -371,19 +438,22 @@ export default function Home() {
         {!loading && !error && activeTab === 'solver' && (
           <ProblemSolver
             queue={solverQueue}
+            setQueue={setSolverQueue}
             index={solverIndex}
             setIndex={setSolverIndex}
             onGrade={handleGrade}
             queueLabel={solverLabel}
+            onFinish={() => setActiveTab('dashboard')}
           />
         )}
         {!loading && !error && activeTab === 'planner' && (
-          <MonthlyPlanner studyRecords={studyRecords} />
+          <MonthlyPlanner dailyStats={dailyStats} />
         )}
         {!loading && !error && activeTab === 'store' && (
           <RewardStore
             currentPoints={currentPoints}
-            pointHistory={pointHistory}
+            dailyStats={dailyStats}
+            pointLogs={pointLogs}
             onRedeem={handleRedeemPoints}
           />
         )}

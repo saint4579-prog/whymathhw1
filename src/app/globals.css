@@ -2,6 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --app-header-height: 0px;
+}
+
 html,
 body {
   height: 100%;

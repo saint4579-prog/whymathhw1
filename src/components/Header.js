@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
+
 const TABS = [
   { key: 'dashboard', label: '📊 전체 현황판' },
   { key: 'wrongNotes', label: '❌ 오답노트' },
@@ -10,8 +12,32 @@ const TABS = [
 ];
 
 export default function Header({ activeTab, setActiveTab, currentPoints = 0 }) {
+  const headerRef = useRef(null);
+
+  useEffect(() => {
+    const header = headerRef.current;
+    if (!header) return undefined;
+
+    const updateHeaderHeight = () => {
+      document.documentElement.style.setProperty('--app-header-height', `${header.offsetHeight}px`);
+    };
+
+    updateHeaderHeight();
+    const observer = new ResizeObserver(updateHeaderHeight);
+    observer.observe(header);
+    window.addEventListener('resize', updateHeaderHeight);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateHeaderHeight);
+    };
+  }, []);
+
   return (
-    <header className="sticky top-0 z-10 border-b-4 border-rose-100 bg-amber-50/90 shadow-lg shadow-amber-100/60 backdrop-blur">
+    <header
+      ref={headerRef}
+      className="sticky top-0 z-30 border-b-4 border-rose-100 bg-amber-50/95 shadow-lg shadow-amber-100/60 backdrop-blur"
+    >
       <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3">
         <h1 className="text-lg font-extrabold text-rose-500 sm:text-xl">
           🐶 멍멍! 나의 강아지 수학 복습 다이어리 🐾
@@ -21,20 +47,20 @@ export default function Header({ activeTab, setActiveTab, currentPoints = 0 }) {
             💰 {Number(currentPoints).toLocaleString()} P
           </span>
           <nav className="flex flex-wrap gap-2">
-          {TABS.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setActiveTab(tab.key)}
-              className={`rounded-full px-4 py-2 text-sm font-bold transition ${
-                activeTab === tab.key
-                  ? 'bg-rose-400 text-white shadow-md shadow-rose-200'
-                  : 'bg-white text-amber-700 hover:bg-amber-100'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+            {TABS.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={`rounded-full px-4 py-2 text-sm font-bold transition ${
+                  activeTab === tab.key
+                    ? 'bg-rose-400 text-white shadow-md shadow-rose-200'
+                    : 'bg-white text-amber-700 hover:bg-amber-100'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </nav>
         </div>
       </div>
