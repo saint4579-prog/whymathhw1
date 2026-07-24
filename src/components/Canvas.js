@@ -2,13 +2,29 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 
-const Canvas = forwardRef(function Canvas({ disabled = false, onDrawEnd }, ref) {
+const PEN_WIDTH = 2.5;
+const ERASER_WIDTH = 24;
+
+const Canvas = forwardRef(function Canvas(
+  { disabled = false, onDrawEnd, color = '#1e293b', tool = 'pen' },
+  ref
+) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const isDrawingRef = useRef(false);
   const hasContentRef = useRef(false);
   const lastPointRef = useRef({ x: 0, y: 0 });
   const restoreSequenceRef = useRef(0);
+  // 현재 펜 색상/도구를 ref로 들고 있어야 포인터 핸들러(클로저)가 항상 최신 값을 읽는다.
+  const colorRef = useRef(color);
+  const toolRef = useRef(tool);
+
+  useEffect(() => {
+    colorRef.current = color;
+  }, [color]);
+  useEffect(() => {
+    toolRef.current = tool;
+  }, [tool]);
 
   const getContext = () => canvasRef.current?.getContext('2d');
 
@@ -18,7 +34,23 @@ const Canvas = forwardRef(function Canvas({ disabled = false, onDrawEnd }, ref) 
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = '#1e293b';
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = PEN_WIDTH;
+  }, []);
+
+  // 그리기 직전에 현재 도구(펜/지우개)와 색상에 맞춰 컨텍스트를 설정한다.
+  // 지우개는 destination-out 합성 모드로 실제 픽셀을 투명하게 지운다.
+  const applyBrush = useCallback(() => {
+    const ctx = getContext();
+    if (!ctx) return;
+    if (toolRef.current === 'eraser') {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.strokeStyle = 'rgba(0,0,0,1)';
+      ctx.lineWidth = ERASER_WIDTH;
+    } else {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.strokeStyle = colorRef.current;
+      ctx.lineWidth = PEN_WIDTH;
+    }
   }, []);
 
   // 캔버스의 실제 픽셀 크기가 바뀌면 브라우저가 내용을 지우므로,
@@ -135,6 +167,7 @@ const Canvas = forwardRef(function Canvas({ disabled = false, onDrawEnd }, ref) 
     canvasRef.current.setPointerCapture(event.pointerId);
     isDrawingRef.current = true;
     lastPointRef.current = getPos(event);
+    applyBrush();
   };
 
   const handlePointerMove = (event) => {
@@ -142,6 +175,7 @@ const Canvas = forwardRef(function Canvas({ disabled = false, onDrawEnd }, ref) 
     event.preventDefault();
     const ctx = getContext();
     if (!ctx) return;
+    applyBrush();
     const pos = getPos(event);
     ctx.beginPath();
     ctx.moveTo(lastPointRef.current.x, lastPointRef.current.y);

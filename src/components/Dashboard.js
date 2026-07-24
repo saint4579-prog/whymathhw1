@@ -2,10 +2,37 @@
 
 import { useMemo, useState } from 'react';
 import ProblemListTable from './ProblemListTable';
+import MockExamBoard from './MockExamBoard';
 import { isSolved, extractPageNumber } from '@/lib/problemUtils';
 import { buildHintResultMessage, prepareGeminiHint } from '@/lib/geminiPrompt';
 import { CHARACTERS } from '@/lib/characters';
 import CharacterMascot from './CharacterMascot';
+
+const WORKBOOKS = [
+  { id: 'yi', label: '와이수학-대수-공통수학1' },
+  { id: 'mockExam', label: '영재원 대비_모의고사' },
+];
+
+function WorkbookTabs({ activeWorkbook, onWorkbookChange }) {
+  return (
+    <div className="mb-4 flex flex-wrap justify-center gap-2">
+      {WORKBOOKS.map((wb) => (
+        <button
+          key={wb.id}
+          type="button"
+          onClick={() => onWorkbookChange(wb.id)}
+          className={`rounded-full px-5 py-2 text-sm font-extrabold shadow-sm transition ${
+            activeWorkbook === wb.id
+              ? 'bg-rose-400 text-white shadow-rose-200'
+              : 'bg-white text-amber-600 hover:bg-amber-50'
+          }`}
+        >
+          {wb.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function SummaryCard({ label, value, character }) {
   const theme = character ? CHARACTERS[character] : null;
@@ -38,6 +65,11 @@ export default function Dashboard({
   onSetDailyGoal,
   onSelectRange,
   onDeselectRange,
+  activeWorkbook,
+  onWorkbookChange,
+  mockExamProblems = [],
+  onSolveMockExam,
+  onSolveMockGoal,
 }) {
   const [copying, setCopying] = useState(false);
   const [startPage, setStartPage] = useState('');
@@ -111,9 +143,31 @@ export default function Dashboard({
     }
   };
 
+  if (activeWorkbook === 'mockExam') {
+    const mockTotal = mockExamProblems.length;
+    const mockSolvedCount = mockExamProblems.filter(isSolved).length;
+    const mockCorrectCount = mockExamProblems.filter((p) => p.isCorrect === 'O').length;
+    return (
+      <div className="mx-auto max-w-6xl">
+        <WorkbookTabs activeWorkbook={activeWorkbook} onWorkbookChange={onWorkbookChange} />
+        <div className="mb-4 grid grid-cols-3 gap-3">
+          <SummaryCard label="전체 문제" value={mockTotal} character="elephant" />
+          <SummaryCard label="풀이 완료" value={mockSolvedCount} character="chick" />
+          <SummaryCard label="정답 수" value={mockCorrectCount} character="fox" />
+        </div>
+        <MockExamBoard
+          problems={mockExamProblems}
+          onSolve={onSolveMockExam}
+          onSolveGoal={onSolveMockGoal}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-6xl">
       <div className="sticky top-[var(--app-header-height)] z-20 -mx-4 mb-4 space-y-3 bg-gradient-to-b from-amber-50 via-amber-50/95 to-amber-50/80 px-4 pb-3 pt-1 backdrop-blur md:-mx-6 md:px-6">
+        <WorkbookTabs activeWorkbook={activeWorkbook} onWorkbookChange={onWorkbookChange} />
         <div className="grid grid-cols-3 gap-3">
           <SummaryCard label="전체 문제" value={total} character="elephant" />
           <SummaryCard label="풀이 완료" value={solvedCount} character="chick" />
