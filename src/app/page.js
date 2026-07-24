@@ -6,6 +6,7 @@ import Dashboard from '@/components/Dashboard';
 import WrongNotebook from '@/components/WrongNotebook';
 import ReviewMode from '@/components/ReviewMode';
 import ProblemSolver from '@/components/ProblemSolver';
+import MockExamSolver from '@/components/MockExamSolver';
 import MonthlyPlanner from '@/components/MonthlyPlanner';
 import RewardStore from '@/components/RewardStore';
 import CharacterCollection from '@/components/CharacterCollection';
@@ -101,6 +102,10 @@ export default function Home() {
   const [userInfo, setUserInfo] = useState(undefined);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [problems, setProblems] = useState([]);
+  // [영재원 대비_모의고사] 문제집. 전체 현황판에서 선택하는 문제집 탭에 따라 이 목록이 노출된다.
+  const [mockExamProblems, setMockExamProblems] = useState([]);
+  // 전체 현황판에서 어느 문제집 탭이 선택되어 있는지 ('yi' | 'mockExam')
+  const [activeWorkbook, setActiveWorkbook] = useState('yi');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [pointHistory, setPointHistory] = useState([]);
@@ -115,6 +120,8 @@ export default function Home() {
   const [solverQueue, setSolverQueue] = useState([]);
   const [solverIndex, setSolverIndex] = useState(0);
   const [solverLabel, setSolverLabel] = useState('');
+  // 지금 풀이 중인 문제집. handleGrade에서 어느 목록/시트를 갱신할지 결정하는 데 쓰인다.
+  const [solverWorkbook, setSolverWorkbook] = useState('yi');
 
   // 전체 현황판의 "오늘의 학습 목표" 체크박스 선택 상태 (rowNumber 집합)
   const [selectedRows, setSelectedRows] = useState(new Set());
@@ -200,6 +207,7 @@ export default function Home() {
         savedPoints;
 
       setProblems(sortProblemsByPage(Array.isArray(problemList) ? problemList : []));
+      setMockExamProblems(Array.isArray(root?.mockExamProblems) ? root.mockExamProblems : []);
       setPointHistory(mergedPointHistory);
       setCurrentPoints(loadedPoints);
       setDailyStats(
@@ -247,15 +255,23 @@ export default function Home() {
     setUserInfo(data);
   };
 
-  const startSolving = (list, rowNumber, label) => {
+  const startSolving = (list, rowNumber, label, workbook = 'yi') => {
     const startIndex = rowNumber == null ? 0 : Math.max(list.findIndex((p) => p.rowNumber === rowNumber), 0);
     setSolverQueue(list);
     setSolverIndex(startIndex);
     setSolverLabel(label);
+    setSolverWorkbook(workbook);
     setActiveTab('solver');
   };
 
   const handleSolveFromDashboard = (rowNumber) => startSolving(problems, rowNumber, '전체 문제');
+
+  const handleSolveMockExam = (rowNumber) =>
+    startSolving(mockExamProblems, rowNumber, '영재원 대비 모의고사', 'mockExam');
+
+  // 모의고사 현황판에서 체크박스로 고른 문제들만 순서대로 푼다. (오늘의 학습 목표)
+  const handleSolveMockGoal = (list) =>
+    startSolving(list, null, '오늘의 모의고사 목표', 'mockExam');
 
   const handleSolveFromWrongNotes = (rowNumber) => {
     const wrongList = problems.filter((p) => p.isCorrect === 'X');
@@ -314,6 +330,8 @@ export default function Home() {
 
   // ProblemSolver에서 O/X 채점 시 호출: 구글 시트로 결과 전송 + 로컬 복습 스케줄 갱신 + 상태 갱신
   const handleGrade = async (problem, isCorrect, canvasImage, solveTimeSec) => {
+    // 현재 풀이 중인 문제집이 [영재원 대비_모의고사]면 모의고사문제목록 시트를 갱신하도록 알려준다.
+    const isMockExam = solverWorkbook === 'mockExam';
     // code는 학습기록 B열 콘텐츠 코드에 필요하므로 현재 문제에서 직접 전달한다.
     // userName은 학생별로 학습 기록/포인트를 분리해서 저장하기 위해 함께 전달한다.
     const response = await submitGrade(
@@ -322,7 +340,8 @@ export default function Home() {
       problem.code,
       canvasImage,
       solveTimeSec,
-      userInfo?.name
+      userInfo?.name,
+      isMockExam ? 'mockExam' : undefined
     );
     const responseRoot = getPayloadRoot(response);
     const submittedUrl =
@@ -354,20 +373,24 @@ export default function Home() {
       solveTimeSec,
     };
 
-    recordAttempt(problem.rowNumber, isCorrect);
-    setProblems((prev) =>
-      prev.map((p) =>
-        p.rowNumber === problem.rowNumber
-          ? {
-              ...p,
-              submitted: submittedUrl || p.submitted || true,
-              isCorrect,
-              reviewCount: (Number(p.reviewCount) || 0) + 1,
-              historyLogs: [...(Array.isArray(p.historyLogs) ? p.historyLogs : []), historyLog],
-            }
-          : p
-      )
-    );
+    // 망각곡선 복습 스케줄은 [와이수학-대수-공통수학1] 문제집 전용이다. 모의고사는 시트가 달라
+    // rowNumber가 겹칠 수 있으므로 여기서는 스케줄에 기록하지 않는다.
+    if (!isMockExam) recordAttempt(problem.rowNumber, isCorrect);
+    const applyGradeUpdate = (p) =>
+      p.rowNumber === problem.rowNumber
+        ? {
+            ...p,
+            submitted: submittedUrl || p.submitted || true,
+            isCorrect,
+            reviewCount: (Number(p.reviewCount) || 0) + 1,
+            historyLogs: [...(Array.isArray(p.historyLogs) ? p.historyLogs : []), historyLog],
+          }
+        : p;
+    if (isMockExam) {
+      setMockExamProblems((prev) => prev.map(applyGradeUpdate));
+    } else {
+      setProblems((prev) => prev.map(applyGradeUpdate));
+    }
     setDailyStats((prev) => {
       const todayKey = getLocalDateKey();
       const existingKey =
@@ -496,6 +519,11 @@ export default function Home() {
             onSetDailyGoal={handleSetDailyGoal}
             onSelectRange={selectRowNumbers}
             onDeselectRange={deselectRowNumbers}
+            activeWorkbook={activeWorkbook}
+            onWorkbookChange={setActiveWorkbook}
+            mockExamProblems={mockExamProblems}
+            onSolveMockExam={handleSolveMockExam}
+            onSolveMockGoal={handleSolveMockGoal}
           />
         )}
         {!loading && !error && activeTab === 'wrongNotes' && (
@@ -508,7 +536,18 @@ export default function Home() {
             onStartReview={handleStartReview}
           />
         )}
-        {!loading && !error && activeTab === 'solver' && (
+        {!loading && !error && activeTab === 'solver' && solverWorkbook === 'mockExam' && (
+          <MockExamSolver
+            queue={solverQueue}
+            setQueue={setSolverQueue}
+            index={solverIndex}
+            setIndex={setSolverIndex}
+            onGrade={handleGrade}
+            queueLabel={solverLabel}
+            onFinish={() => setActiveTab('dashboard')}
+          />
+        )}
+        {!loading && !error && activeTab === 'solver' && solverWorkbook !== 'mockExam' && (
           <ProblemSolver
             queue={solverQueue}
             setQueue={setSolverQueue}

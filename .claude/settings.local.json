@@ -20,7 +20,9 @@
       "Bash(curl -sL \"https://script.google.com/macros/s/AKfycbz9qdyqPLpDUHthPDpnynv0uSivgayGtMbOSfFdFLQNlqtpS_swx7eWug6i0orQsvtw/exec\" -o /tmp/api_response.json)",
       "Bash(mkdir -p /c/Users/user/AppData/Local/Temp/claude/C--Users-user-Desktop-vibecoding-----------/6209cd23-a8df-4e20-9319-507bc1032041/scratchpad)",
       "Bash(curl -sL \"https://script.google.com/macros/s/AKfycbz9qdyqPLpDUHthPDpnynv0uSivgayGtMbOSfFdFLQNlqtpS_swx7eWug6i0orQsvtw/exec\" -o \"/c/Users/user/AppData/Local/Temp/claude/C--Users-user-Desktop-vibecoding-----------/6209cd23-a8df-4e20-9319-507bc1032041/scratchpad/api_response.json\")",
-      "Bash(curl -sL \"https://script.google.com/macros/s/AKfycbz9qdyqPLpDUHthPDpnynv0uSivgayGtMbOSfFdFLQNlqtpS_swx7eWug6i0orQsvtw/exec?userName=%ED%85%8C%EC%8A%A4%ED%8A%B8%EC%9C%A0%EC%A0%80\")"
+      "Bash(curl -sL \"https://script.google.com/macros/s/AKfycbz9qdyqPLpDUHthPDpnynv0uSivgayGtMbOSfFdFLQNlqtpS_swx7eWug6i0orQsvtw/exec?userName=%ED%85%8C%EC%8A%A4%ED%8A%B8%EC%9C%A0%EC%A0%80\")",
+      "Bash(node fetch_dims.js)",
+      "Bash(echo \"EXIT:$?\")"
     ]
   }
 }
