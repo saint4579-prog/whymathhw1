@@ -93,6 +93,93 @@ export async function registerUser(grade, name, gender) {
   return parseApiResponse(res, '사용자 등록에 실패했습니다.');
 }
 
+// ---------------------------------------------------------------------------
+// 스터디 플래너 API
+// 구글 시트의 '플래너' 시트에 사용자별 계획을 통째로 JSON으로 저장한다.
+// 네트워크가 끊겨도 아이가 계획을 잃지 않도록, 항상 localStorage에 먼저 캐시한다.
+// ---------------------------------------------------------------------------
+
+const PLANNER_CACHE_KEY = 'dog-math-planner-cache';
+
+function plannerCacheKey(userName) {
+  return `${PLANNER_CACHE_KEY}:${userName || 'guest'}`;
+}
+
+// 저장 실패/오프라인 대비 로컬 캐시. 서버 응답이 오면 이 값을 덮어쓴다.
+export function readPlannerCache(userName) {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(plannerCacheKey(userName));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writePlannerCache(userName, state) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(plannerCacheKey(userName), JSON.stringify(state));
+  } catch {
+    // 저장소가 막힌 환경에서도 화면 상태는 계속 유지된다.
+  }
+}
+
+// 플래너 전체 상태(목표 목록 + 날짜별 하루 계획)를 시트에서 불러온다.
+// 실패하면 예외를 던지지 않고 로컬 캐시로 폴백해서, 아이 화면이 절대 비어 보이지 않게 한다.
+export async function fetchPlanner(userName) {
+  const name = userName ?? getStoredUserName();
+  const cached = readPlannerCache(name);
+  try {
+    const url = `${API_URL}?type=GET_PLANNER&userName=${encodeURIComponent(name || '')}`;
+    const res = await fetch(url, { cache: 'no-store' });
+    const data = await parseApiResponse(res, '플래너를 불러오지 못했습니다.');
+    const planner = data?.planner ?? data?.data?.planner ?? null;
+    if (planner) {
+      writePlannerCache(name, planner);
+      return { planner, source: 'remote' };
+    }
+    return { planner: cached, source: cached ? 'cache' : 'empty' };
+  } catch (error) {
+    return { planner: cached, source: cached ? 'cache' : 'empty', error: String(error.message || error) };
+  }
+}
+
+// 목표/하루 계획 변경분을 시트에 통째로 저장한다. (마지막 저장이 이김 - 아이 1명이 쓰는 앱이라 충분)
+export async function savePlanner(planner, userName) {
+  const name = userName ?? getStoredUserName();
+  writePlannerCache(name, planner); // 낙관적 저장: 네트워크보다 먼저 로컬에 남긴다.
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    redirect: 'follow',
+    body: JSON.stringify({
+      type: 'SAVE_PLANNER',
+      userName: name,
+      planner,
+    }),
+  });
+  return parseApiResponse(res, '플래너 저장에 실패했습니다.');
+}
+
+// 하루를 마감하며 달성률만큼 포인트를 지급한다.
+// 중복 지급을 막기 위해 date를 키로 쓰고, 서버는 같은 날짜의 이전 지급액과의 차액만 기록한다.
+export async function awardPlannerPoints(date, amount, achievementRate, userName) {
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    redirect: 'follow',
+    body: JSON.stringify({
+      type: 'PLANNER_POINT',
+      date,
+      amount: Math.max(0, Math.round(Number(amount) || 0)),
+      achievementRate: Number(achievementRate) || 0,
+      userName: userName ?? getStoredUserName(),
+    }),
+  });
+  return parseApiResponse(res, '플래너 포인트 지급에 실패했습니다.');
+}
+
 // 구글 시트가 반환하는 "drive.google.com/uc?export=view&id=..." 형태의 링크는
 // 최종 리소스에 Cross-Origin-Resource-Policy: same-site 헤더가 붙어 있어
 // 다른 도메인(Vercel 배포 주소 등)의 <img> 태그에서는 브라우저가 차단한다.

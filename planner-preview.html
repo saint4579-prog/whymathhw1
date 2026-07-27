@@ -1,0 +1,2791 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>스터디 플래너 미리보기</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.development.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.development.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.4/babel.min.js"></script>
+<style>
+@keyframes mascot-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+@keyframes mascot-wiggle{0%,100%{transform:rotate(-5deg)}50%{transform:rotate(5deg)}}
+.animate-mascot-bob{animation:mascot-bob 2.6s ease-in-out infinite}
+.animate-mascot-wiggle{animation:mascot-wiggle 2s ease-in-out infinite}
+body{background:linear-gradient(to bottom,#fffbeb,#fff1f2,#fffbeb);min-height:100vh}
+</style></head>
+<body>
+<div class="sticky top-0 z-30 border-b-4 border-rose-100 bg-amber-50/95 shadow-lg backdrop-blur">
+  <div class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+    <h1 class="text-lg font-extrabold text-rose-500 sm:text-xl">🐶 멍멍! 나의 강아지 수학 복습 다이어리 🐾</h1>
+    <div class="flex flex-wrap items-center justify-end gap-2">
+      <span class="rounded-full border-2 border-white bg-violet-300 px-3 py-2 text-sm font-black text-violet-900 shadow-md">🏅 Lv 4</span>
+      <span id="pointBadge" class="rounded-full border-2 border-white bg-yellow-300 px-4 py-2 text-sm font-black text-amber-900 shadow-md">💰 1,240 P</span>
+      <nav class="flex flex-wrap gap-2">
+        <span class="rounded-full bg-white px-4 py-2 text-sm font-bold text-amber-700">📊 전체 현황판</span>
+        <span class="rounded-full bg-white px-4 py-2 text-sm font-bold text-amber-700">❌ 오답노트</span>
+        <span class="rounded-full bg-rose-400 px-4 py-2 text-sm font-bold text-white shadow-md">📝 스터디 플래너</span>
+        <span class="rounded-full bg-white px-4 py-2 text-sm font-bold text-amber-700">📅 월간 플래너</span>
+        <span class="rounded-full bg-white px-4 py-2 text-sm font-bold text-amber-700">🎁 보상 상점</span>
+      </nav>
+    </div>
+  </div>
+</div>
+<div id="root" class="p-4 md:p-6"></div>
+
+<script type="text/babel" data-type="module">
+const {useState,useEffect,useMemo,useRef,useCallback}=React;
+
+// 앱 곳곳에 장식으로 배치하고, 레벨업으로 모으는 동물 캐릭터들.
+//
+// 이미지는 프로젝트에 저장하지 않고 구글 드라이브에서 직접 불러온다.
+// (로컬 파일은 배포 위치에 따라 경로가 깨지는 문제가 있었다.)
+// drive.google.com/uc?export=view 형식은 CORP(same-site) 헤더 때문에 다른 도메인의
+// <img>에서 차단되므로, 제한이 없는 lh3.googleusercontent.com 썸네일 CDN을 쓴다.
+// =s400: 가장 긴 변을 400px로 맞춘다. 장식용 작은 이미지라 이 정도면 선명하고 가볍다.
+const DRIVE_IDS = {
+  frog: '151typ-XjjrHhdAmOsc-60djfZUiTR6DZ',
+  chick: '1PhcyhoAKA6xnfQLXnQ1iH-O_ZEUS0rAN',
+  fox: '1Z9MphY_VryMMXngXYRR3j90S6gg4921c',
+  penguin: '1D6mIbiJCgZb5ava0Sk885iBcAczcvWTV',
+  hedgehog: '1eHe6lAmFb79Wxxgzgwkl8CGFY-J8Sdz8',
+  raccoon: '16-lxyQXeiernviS0eukSwHhk-YCYeMwy',
+  cat: '1xJ_yibwAyT16OMf8_x-FsLg1ZPvg7E63',
+  elephant: '1NIVCvzT6sRBZlPlQnvNWkw1uhGnPeVbk',
+  blackpenguin: '1iCj_CB6ZMfrXDp9DY1xhrI0EDldRg3Ah',
+  sloth: '1eXwrS-9yzGfmzmb-gIHxFWYAzNE4v_sr',
+  // 동물의 숲 캐릭터 69마리 (레벨업 컬렉션 확장분, ac01~ac69)
+  ac01: '10PKtkvrgtIrrRqslFOFc3bcdmPQrodMG',
+  ac02: '1gS2w-kUlgAHYgZvlXGSucUEOAjYs5VgI',
+  ac03: '12fY1UZSJwnbe5bI-zad6jjAxde3z28ml',
+  ac04: '1e79nYf3jEg5jNQyrzeN5Rh00a1e5YUiz',
+  ac05: '1gbrfW5MxAiCLXufPxu0V-umOVx-OlzLm',
+  ac06: '14m16tkfsdHcScSD1Fy09q2f1WEl9MPCr',
+  ac07: '1JCkzWQ5WC6nIgjt7mO3oVUb9qQSxFgTR',
+  ac08: '1TtRzao7XRAzCaubtBnRAYJ1W-64ZDntd',
+  ac09: '13j9QlH8maU3-yshQod82lieenSPed-9p',
+  ac10: '1Q9Jk23HohZ1oZ9XE_sckxzPoBCCHA9Yb',
+  ac11: '1rbKtQ9_sjADGUBbO0ro9cuG5tvlPAGVO',
+  ac12: '1zJ68W6MK_zHzhdHIUKRTSGpexqu5Jikl',
+  ac13: '1Suw9NgxXM-cey3KBsu68JzFMiGNpMUuX',
+  ac14: '1TJ7-5ENdABM_196SsMW4jBr0ZNiWSP0n',
+  ac15: '1YGXt0g2j7SOmVireujW0olcCJKwyOtr2',
+  ac16: '1qn-BUrxmJHR8Qp_Jdv2u-Bh71IMndiRN',
+  ac17: '1aQ5_KzmqRQK6lHHJ_0mnu1CTGXst-PiS',
+  ac18: '1clDlrKgUaQPG8rSMJexKN7OFw8u8NYBz',
+  ac19: '1dZZtfqLOGh9zePhwLctgWKWG1xqRjrTf',
+  ac20: '17c-WgsU9vwMHqBjdJmURc4AhgnMrJ_xl',
+  ac21: '1__jttc1PpTeX1bTXp1KXEaJjhKivSzAN',
+  ac22: '1b_8FPUxunusVE05y3zY614XEXxTaijpR',
+  ac23: '1ip9ZBGuD4zniEhMx3d-u-Kl8HZntu4uJ',
+  ac24: '178oiwYz77FU7OKlENW8WBulqB3N8K1vJ',
+  ac25: '17JfviYwhvaL9sgz6WhQrlopoEOwu6iPm',
+  ac26: '1jy1XrmbTz6MAxQUUj-89TfQ52Q4Ou0EU',
+  ac27: '1vHx6Z7CC9pAFSSQ0WnBfhIzMtZsqeran',
+  ac28: '1B3SRXirO6e6iCcVFcNlacpo_u_O-Rev2',
+  ac29: '1JTrfbt68gENteetKV83DtPfxMzmW6dgK',
+  ac30: '1LQTl59CdCI-M3Kuvj7T-5NAlr7MLPpal',
+  ac31: '1SZNTfEWpLWzhzDyYEMM05wztut3NtNEm',
+  ac32: '1VvtO7ymfk08tZzCDN75_J0r47i9-3CzY',
+  ac33: '1_RMbBJUZc2YY7lzlfJYTZadHAwzBh-z1',
+  ac34: '1drppmm9GTgpnfOttNH4Z4yURAvOVgXoi',
+  ac35: '17TMQ7LoadG3gaCCHh3gtxu3xX7Hk12dk',
+  ac36: '1N0oWTPWvbbkHrw2TLt-9p6YRcDzT3ndM',
+  ac37: '1n3uIOfiuHUccXp4INYDZz-lyyU5QuhD-',
+  ac38: '1tO-FsEpSCwZ4EqQgcZjjmueoMfLllyYm',
+  ac39: '1PhqehIfUxg9jpDONx3DyOo12DPn6nr7e',
+  ac40: '1TF6bgknHmdynFm7rAKgFyP52-ihUU8o-',
+  ac41: '1q7GdoDE2zzpmWWNmzYZHwuLhxQhyfZih',
+  ac42: '1uI1ZavcS9kLq74Vz8yg-JlR9hhxY3oa-',
+  ac43: '1GlkXm_uOR0sUyQdrze1sMSAkF1E64P2_',
+  ac44: '1SPRoTWjPkGqnu9n3Iby5NoQesxOuvTY8',
+  ac45: '1WaW6Y62JDc88GDEAFP_WRNElBK32ZWLo',
+  ac46: '1fvl_0L6UcTrMsitEgcLym1nzj5GuqY2L',
+  ac47: '1i3de2FJXfcEnDFcSVoXE1NdxbJ3MFidI',
+  ac48: '1iNKPMYSNVFQiBaqz2x3T8sxjWo3Spo_k',
+  ac49: '1rcsl74teE5s5n1o_X8GSrDp13yVRNel2',
+  ac50: '1vdjQs1pZBHvmYlqE189TLc8H8ZqvE-pw',
+  ac51: '1g0f0QTSvdQnF61tLiVA52bizTWEcpWeu',
+  ac52: '1g1V08ClHeMUagtVeiQYeYmk0npYZIeeJ',
+  ac53: '1uN1FnJRHuItLTu6EYsbLPU48G3KAobp3',
+  ac54: '1zgclxyD3NmNzRh374NX4mZpEH-jTV7DS',
+  ac55: '10cHtNbC7WJ-Hqte6oOYQFoF4pKknNuv3',
+  ac56: '1XwQ3RL2N0gSPg7acQVx9cCasmMPsJYlr',
+  ac57: '1bP2ej7JY34545qPmXCMZRMeoTP0Cbnf9',
+  ac58: '1gXeceAQssLmDq701_tCafgdOln3hyVOJ',
+  ac59: '1_6v4kkP7glrbZoGgVg32nQeT6seF-Fce',
+  ac60: '1f9G6jVus9C1W1JG5L0Zpn4QBBCpDjKai',
+  ac61: '1q06F3ACD1aMjbay-yw_IVwUtWGwt4_sM',
+  ac62: '1vdkRUn6qxcLlE6rgKWs63XNjfeJreDm5',
+  ac63: '1K5VfefzXKc21_6skCGW8_ehAA5D97InM',
+  ac64: '1NGW1XIBxytmtm112kt0OHNLdvLoxBqFQ',
+  ac65: '1VvpMLjMcfkpI6drx83WsNIszpBCuckDr',
+  ac66: '1B__DHPh0wJNf-h4oxKGsoAYJAjEyjGLN',
+  ac67: '1MV7avlEF2w1SThK887eUx_kushSXK_Ob',
+  ac68: '1sSQoRXGMSipAyjB0XGJA0ZsbH063rSNI',
+  ac69: '1CVUvld4y0Sen2QrFn-vuwX081vIWlOoi',
+};
+
+function driveImageUrl(id) {
+  return `https://lh3.googleusercontent.com/d/${id}=s400`;
+}
+
+// naturalWidth/naturalHeight는 원본 PNG의 픽셀 비율이다.
+// CharacterMascot가 이 비율로 <img>에 width/height를 지정해, 네트워크로 이미지를
+// 불러오기 전에도 정확한 자리를 잡아 레이아웃 밀림(CLS)과 헤더 높이 튐을 막는다.
+// label: 아이에게 보여줄 이름. ring/glow: 카드 장식에 쓰는 캐릭터별 색 톤.
+const CHARACTERS = {
+  frog: {
+    src: driveImageUrl(DRIVE_IDS.frog),
+    label: '개구리',
+    alt: '개구리 친구',
+    naturalWidth: 290,
+    naturalHeight: 251,
+    ring: 'border-emerald-100',
+    glow: 'shadow-emerald-100/60',
+  },
+  chick: {
+    src: driveImageUrl(DRIVE_IDS.chick),
+    label: '병아리',
+    alt: '병아리 친구',
+    naturalWidth: 302,
+    naturalHeight: 317,
+    ring: 'border-yellow-100',
+    glow: 'shadow-yellow-100/60',
+  },
+  fox: {
+    src: driveImageUrl(DRIVE_IDS.fox),
+    label: '여우',
+    alt: '여우 친구',
+    naturalWidth: 339,
+    naturalHeight: 290,
+    ring: 'border-orange-100',
+    glow: 'shadow-orange-100/60',
+  },
+  penguin: {
+    src: driveImageUrl(DRIVE_IDS.penguin),
+    label: '갈색 펭귄',
+    alt: '갈색 펭귄 친구',
+    naturalWidth: 290,
+    naturalHeight: 268,
+    ring: 'border-stone-200',
+    glow: 'shadow-stone-100/60',
+  },
+  hedgehog: {
+    src: driveImageUrl(DRIVE_IDS.hedgehog),
+    label: '고슴도치',
+    alt: '고슴도치 친구',
+    naturalWidth: 307,
+    naturalHeight: 285,
+    ring: 'border-orange-100',
+    glow: 'shadow-orange-100/60',
+  },
+  raccoon: {
+    src: driveImageUrl(DRIVE_IDS.raccoon),
+    label: '라쿤',
+    alt: '라쿤 친구',
+    naturalWidth: 296,
+    naturalHeight: 258,
+    ring: 'border-slate-200',
+    glow: 'shadow-slate-100/60',
+  },
+  cat: {
+    src: driveImageUrl(DRIVE_IDS.cat),
+    label: '줄무늬 고양이',
+    alt: '줄무늬 고양이 친구',
+    naturalWidth: 327,
+    naturalHeight: 270,
+    ring: 'border-slate-200',
+    glow: 'shadow-slate-100/60',
+  },
+  elephant: {
+    src: driveImageUrl(DRIVE_IDS.elephant),
+    label: '코끼리',
+    alt: '코끼리 친구',
+    naturalWidth: 419,
+    naturalHeight: 248,
+    ring: 'border-amber-100',
+    glow: 'shadow-amber-100/60',
+  },
+  blackpenguin: {
+    src: driveImageUrl(DRIVE_IDS.blackpenguin),
+    label: '검정 펭귄',
+    alt: '검정 펭귄 친구',
+    naturalWidth: 315,
+    naturalHeight: 241,
+    ring: 'border-slate-300',
+    glow: 'shadow-slate-200/60',
+  },
+  sloth: {
+    src: driveImageUrl(DRIVE_IDS.sloth),
+    label: '나무늘보',
+    alt: '나무늘보 친구',
+    naturalWidth: 309,
+    naturalHeight: 287,
+    ring: 'border-amber-200',
+    glow: 'shadow-amber-100/60',
+  },
+  ac01: {
+    src: driveImageUrl(DRIVE_IDS.ac01),
+    label: '늘봉',
+    alt: '늘봉 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-rose-100',
+    glow: 'shadow-rose-100/60',
+  },
+  ac02: {
+    src: driveImageUrl(DRIVE_IDS.ac02),
+    label: '고순이',
+    alt: '고순이 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-orange-100',
+    glow: 'shadow-orange-100/60',
+  },
+  ac03: {
+    src: driveImageUrl(DRIVE_IDS.ac03),
+    label: '부엉',
+    alt: '부엉 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-amber-100',
+    glow: 'shadow-amber-100/60',
+  },
+  ac04: {
+    src: driveImageUrl(DRIVE_IDS.ac04),
+    label: '펌킹',
+    alt: '펌킹 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-yellow-100',
+    glow: 'shadow-yellow-100/60',
+  },
+  ac05: {
+    src: driveImageUrl(DRIVE_IDS.ac05),
+    label: '밤돌이',
+    alt: '밤돌이 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-lime-100',
+    glow: 'shadow-lime-100/60',
+  },
+  ac06: {
+    src: driveImageUrl(DRIVE_IDS.ac06),
+    label: '패트릭',
+    alt: '패트릭 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-emerald-100',
+    glow: 'shadow-emerald-100/60',
+  },
+  ac07: {
+    src: driveImageUrl(DRIVE_IDS.ac07),
+    label: '고숙이',
+    alt: '고숙이 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-teal-100',
+    glow: 'shadow-teal-100/60',
+  },
+  ac08: {
+    src: driveImageUrl(DRIVE_IDS.ac08),
+    label: '리사',
+    alt: '리사 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-cyan-100',
+    glow: 'shadow-cyan-100/60',
+  },
+  ac09: {
+    src: driveImageUrl(DRIVE_IDS.ac09),
+    label: '솜이',
+    alt: '솜이 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-sky-100',
+    glow: 'shadow-sky-100/60',
+  },
+  ac10: {
+    src: driveImageUrl(DRIVE_IDS.ac10),
+    label: 'K.K.',
+    alt: 'K.K. 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-blue-100',
+    glow: 'shadow-blue-100/60',
+  },
+  ac11: {
+    src: driveImageUrl(DRIVE_IDS.ac11),
+    label: '린크',
+    alt: '린크 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-indigo-100',
+    glow: 'shadow-indigo-100/60',
+  },
+  ac12: {
+    src: driveImageUrl(DRIVE_IDS.ac12),
+    label: '파이프',
+    alt: '파이프 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-violet-100',
+    glow: 'shadow-violet-100/60',
+  },
+  ac13: {
+    src: driveImageUrl(DRIVE_IDS.ac13),
+    label: '카로틴',
+    alt: '카로틴 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-purple-100',
+    glow: 'shadow-purple-100/60',
+  },
+  ac14: {
+    src: driveImageUrl(DRIVE_IDS.ac14),
+    label: '핀틱',
+    alt: '핀틱 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-fuchsia-100',
+    glow: 'shadow-fuchsia-100/60',
+  },
+  ac15: {
+    src: driveImageUrl(DRIVE_IDS.ac15),
+    label: '센트엘로',
+    alt: '센트엘로 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-pink-100',
+    glow: 'shadow-pink-100/60',
+  },
+  ac16: {
+    src: driveImageUrl(DRIVE_IDS.ac16),
+    label: '요비',
+    alt: '요비 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-stone-100',
+    glow: 'shadow-stone-100/60',
+  },
+  ac17: {
+    src: driveImageUrl(DRIVE_IDS.ac17),
+    label: '명고',
+    alt: '명고 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-slate-100',
+    glow: 'shadow-slate-100/60',
+  },
+  ac18: {
+    src: driveImageUrl(DRIVE_IDS.ac18),
+    label: '그리미',
+    alt: '그리미 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-zinc-100',
+    glow: 'shadow-zinc-100/60',
+  },
+  ac19: {
+    src: driveImageUrl(DRIVE_IDS.ac19),
+    label: '체리',
+    alt: '체리 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-neutral-100',
+    glow: 'shadow-neutral-100/60',
+  },
+  ac20: {
+    src: driveImageUrl(DRIVE_IDS.ac20),
+    label: '핑키',
+    alt: '핑키 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-red-100',
+    glow: 'shadow-red-100/60',
+  },
+  ac21: {
+    src: driveImageUrl(DRIVE_IDS.ac21),
+    label: '모니카',
+    alt: '모니카 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-rose-100',
+    glow: 'shadow-rose-100/60',
+  },
+  ac22: {
+    src: driveImageUrl(DRIVE_IDS.ac22),
+    label: '글루민',
+    alt: '글루민 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-orange-100',
+    glow: 'shadow-orange-100/60',
+  },
+  ac23: {
+    src: driveImageUrl(DRIVE_IDS.ac23),
+    label: '2호',
+    alt: '2호 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-amber-100',
+    glow: 'shadow-amber-100/60',
+  },
+  ac24: {
+    src: driveImageUrl(DRIVE_IDS.ac24),
+    label: '아세로라',
+    alt: '아세로라 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-yellow-100',
+    glow: 'shadow-yellow-100/60',
+  },
+  ac25: {
+    src: driveImageUrl(DRIVE_IDS.ac25),
+    label: '부케',
+    alt: '부케 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-lime-100',
+    glow: 'shadow-lime-100/60',
+  },
+  ac26: {
+    src: driveImageUrl(DRIVE_IDS.ac26),
+    label: '연유',
+    alt: '연유 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-emerald-100',
+    glow: 'shadow-emerald-100/60',
+  },
+  ac27: {
+    src: driveImageUrl(DRIVE_IDS.ac27),
+    label: '링링',
+    alt: '링링 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-teal-100',
+    glow: 'shadow-teal-100/60',
+  },
+  ac28: {
+    src: driveImageUrl(DRIVE_IDS.ac28),
+    label: '유네찌',
+    alt: '유네찌 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-cyan-100',
+    glow: 'shadow-cyan-100/60',
+  },
+  ac29: {
+    src: driveImageUrl(DRIVE_IDS.ac29),
+    label: '메링',
+    alt: '메링 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-sky-100',
+    glow: 'shadow-sky-100/60',
+  },
+  ac30: {
+    src: driveImageUrl(DRIVE_IDS.ac30),
+    label: '백프로',
+    alt: '백프로 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-blue-100',
+    glow: 'shadow-blue-100/60',
+  },
+  ac31: {
+    src: driveImageUrl(DRIVE_IDS.ac31),
+    label: '호냥이',
+    alt: '호냥이 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-indigo-100',
+    glow: 'shadow-indigo-100/60',
+  },
+  ac32: {
+    src: driveImageUrl(DRIVE_IDS.ac32),
+    label: '델리',
+    alt: '델리 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-violet-100',
+    glow: 'shadow-violet-100/60',
+  },
+  ac33: {
+    src: driveImageUrl(DRIVE_IDS.ac33),
+    label: '패트라',
+    alt: '패트라 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-purple-100',
+    glow: 'shadow-purple-100/60',
+  },
+  ac34: {
+    src: driveImageUrl(DRIVE_IDS.ac34),
+    label: '마롱이',
+    alt: '마롱이 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-fuchsia-100',
+    glow: 'shadow-fuchsia-100/60',
+  },
+  ac35: {
+    src: driveImageUrl(DRIVE_IDS.ac35),
+    label: '빅희',
+    alt: '빅희 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-pink-100',
+    glow: 'shadow-pink-100/60',
+  },
+  ac36: {
+    src: driveImageUrl(DRIVE_IDS.ac36),
+    label: '베리',
+    alt: '베리 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-stone-100',
+    glow: 'shadow-stone-100/60',
+  },
+  ac37: {
+    src: driveImageUrl(DRIVE_IDS.ac37),
+    label: '마롱',
+    alt: '마롱 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-slate-100',
+    glow: 'shadow-slate-100/60',
+  },
+  ac38: {
+    src: driveImageUrl(DRIVE_IDS.ac38),
+    label: '가위',
+    alt: '가위 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-zinc-100',
+    glow: 'shadow-zinc-100/60',
+  },
+  ac39: {
+    src: driveImageUrl(DRIVE_IDS.ac39),
+    label: '애플',
+    alt: '애플 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-neutral-100',
+    glow: 'shadow-neutral-100/60',
+  },
+  ac40: {
+    src: driveImageUrl(DRIVE_IDS.ac40),
+    label: '크리미',
+    alt: '크리미 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-red-100',
+    glow: 'shadow-red-100/60',
+  },
+  ac41: {
+    src: driveImageUrl(DRIVE_IDS.ac41),
+    label: '루주',
+    alt: '루주 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-rose-100',
+    glow: 'shadow-rose-100/60',
+  },
+  ac42: {
+    src: driveImageUrl(DRIVE_IDS.ac42),
+    label: '차코',
+    alt: '차코 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-orange-100',
+    glow: 'shadow-orange-100/60',
+  },
+  ac43: {
+    src: driveImageUrl(DRIVE_IDS.ac43),
+    label: '크리스틴',
+    alt: '크리스틴 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-amber-100',
+    glow: 'shadow-amber-100/60',
+  },
+  ac44: {
+    src: driveImageUrl(DRIVE_IDS.ac44),
+    label: '세바',
+    alt: '세바 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-yellow-100',
+    glow: 'shadow-yellow-100/60',
+  },
+  ac45: {
+    src: driveImageUrl(DRIVE_IDS.ac45),
+    label: '린타',
+    alt: '린타 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-lime-100',
+    glow: 'shadow-lime-100/60',
+  },
+  ac46: {
+    src: driveImageUrl(DRIVE_IDS.ac46),
+    label: '릴리안',
+    alt: '릴리안 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-emerald-100',
+    glow: 'shadow-emerald-100/60',
+  },
+  ac47: {
+    src: driveImageUrl(DRIVE_IDS.ac47),
+    label: '미미',
+    alt: '미미 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-teal-100',
+    glow: 'shadow-teal-100/60',
+  },
+  ac48: {
+    src: driveImageUrl(DRIVE_IDS.ac48),
+    label: '초코',
+    alt: '초코 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-cyan-100',
+    glow: 'shadow-cyan-100/60',
+  },
+  ac49: {
+    src: driveImageUrl(DRIVE_IDS.ac49),
+    label: '패티카',
+    alt: '패티카 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-sky-100',
+    glow: 'shadow-sky-100/60',
+  },
+  ac50: {
+    src: driveImageUrl(DRIVE_IDS.ac50),
+    label: '루나',
+    alt: '루나 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-blue-100',
+    glow: 'shadow-blue-100/60',
+  },
+  ac51: {
+    src: driveImageUrl(DRIVE_IDS.ac51),
+    label: '피카',
+    alt: '피카 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-indigo-100',
+    glow: 'shadow-indigo-100/60',
+  },
+  ac52: {
+    src: driveImageUrl(DRIVE_IDS.ac52),
+    label: '플라라',
+    alt: '플라라 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-violet-100',
+    glow: 'shadow-violet-100/60',
+  },
+  ac53: {
+    src: driveImageUrl(DRIVE_IDS.ac53),
+    label: '데자네',
+    alt: '데자네 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-purple-100',
+    glow: 'shadow-purple-100/60',
+  },
+  ac54: {
+    src: driveImageUrl(DRIVE_IDS.ac54),
+    label: '사탕',
+    alt: '사탕 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-fuchsia-100',
+    glow: 'shadow-fuchsia-100/60',
+  },
+  ac55: {
+    src: driveImageUrl(DRIVE_IDS.ac55),
+    label: '란자나',
+    alt: '란자나 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-pink-100',
+    glow: 'shadow-pink-100/60',
+  },
+  ac56: {
+    src: driveImageUrl(DRIVE_IDS.ac56),
+    label: '찍순이',
+    alt: '찍순이 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-stone-100',
+    glow: 'shadow-stone-100/60',
+  },
+  ac57: {
+    src: driveImageUrl(DRIVE_IDS.ac57),
+    label: '미자벨',
+    alt: '미자벨 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-slate-100',
+    glow: 'shadow-slate-100/60',
+  },
+  ac58: {
+    src: driveImageUrl(DRIVE_IDS.ac58),
+    label: '고북',
+    alt: '고북 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-zinc-100',
+    glow: 'shadow-zinc-100/60',
+  },
+  ac59: {
+    src: driveImageUrl(DRIVE_IDS.ac59),
+    label: '사하라',
+    alt: '사하라 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-neutral-100',
+    glow: 'shadow-neutral-100/60',
+  },
+  ac60: {
+    src: driveImageUrl(DRIVE_IDS.ac60),
+    label: '카트리나',
+    alt: '카트리나 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-red-100',
+    glow: 'shadow-red-100/60',
+  },
+  ac61: {
+    src: driveImageUrl(DRIVE_IDS.ac61),
+    label: '몽세르',
+    alt: '몽세르 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-rose-100',
+    glow: 'shadow-rose-100/60',
+  },
+  ac62: {
+    src: driveImageUrl(DRIVE_IDS.ac62),
+    label: '여욱',
+    alt: '여욱 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-orange-100',
+    glow: 'shadow-orange-100/60',
+  },
+  ac63: {
+    src: driveImageUrl(DRIVE_IDS.ac63),
+    label: '갑돌',
+    alt: '갑돌 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-amber-100',
+    glow: 'shadow-amber-100/60',
+  },
+  ac64: {
+    src: driveImageUrl(DRIVE_IDS.ac64),
+    label: '해탈한',
+    alt: '해탈한 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-yellow-100',
+    glow: 'shadow-yellow-100/60',
+  },
+  ac65: {
+    src: driveImageUrl(DRIVE_IDS.ac65),
+    label: '콩돌이',
+    alt: '콩돌이 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-lime-100',
+    glow: 'shadow-lime-100/60',
+  },
+  ac66: {
+    src: driveImageUrl(DRIVE_IDS.ac66),
+    label: '고옥이',
+    alt: '고옥이 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-emerald-100',
+    glow: 'shadow-emerald-100/60',
+  },
+  ac67: {
+    src: driveImageUrl(DRIVE_IDS.ac67),
+    label: '너굴',
+    alt: '너굴 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-teal-100',
+    glow: 'shadow-teal-100/60',
+  },
+  ac68: {
+    src: driveImageUrl(DRIVE_IDS.ac68),
+    label: 'DJ K.K.',
+    alt: 'DJ K.K. 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-cyan-100',
+    glow: 'shadow-cyan-100/60',
+  },
+  ac69: {
+    src: driveImageUrl(DRIVE_IDS.ac69),
+    label: '여울',
+    alt: '여울 친구',
+    naturalWidth: 400,
+    naturalHeight: 400,
+    ring: 'border-sky-100',
+    glow: 'shadow-sky-100/60',
+  },
+};
+
+const CHARACTER_NAMES = Object.keys(CHARACTERS);
+
+// 아이 주도형 일일 스터디 플래너의 순수 계산 로직 모음.
+// UI(컴포넌트)와 통신(api.js)에서 완전히 분리해 두어야 테스트와 재사용이 쉽다.
+// 여기 있는 함수는 전부 부수효과가 없고, 입력을 바꾸지 않고 새 객체를 돌려준다.
+
+// ---------------------------------------------------------------------------
+// 1. 상수 정의
+// ---------------------------------------------------------------------------
+
+// 할 일 카테고리. subject는 통계 차트에서 국어/영어/수학 비중을 낼 때 쓰인다.
+const CATEGORIES = [
+  { key: 'HW_YI', label: '숙제-와이(수학)', subject: '수학', emoji: '🐶', color: '#F9A8D4' },
+  { key: 'HW_HWANGSO', label: '숙제-황소(수학)', subject: '수학', emoji: '🐮', color: '#F472B6' },
+  { key: 'HW_APRAB', label: '숙제-에이프랩(영어)', subject: '영어', emoji: '🐤', color: '#FCD34D' },
+  { key: 'HW_GIPARANG', label: '숙제-기파랑(국어)', subject: '국어', emoji: '🐰', color: '#93C5FD' },
+  { key: 'HW_ETC', label: '숙제-기타', subject: '기타', emoji: '🐹', color: '#C4B5FD' },
+  { key: 'SELF', label: '내공부', subject: '기타', emoji: '🐻', color: '#86EFAC' },
+];
+
+const SUBJECTS = ['국어', '영어', '수학', '기타'];
+
+const SUBJECT_COLORS = {
+  국어: '#93C5FD',
+  영어: '#FCD34D',
+  수학: '#F472B6',
+  기타: '#C4B5FD',
+};
+
+// 카테고리별 기본 문제집 후보. 아이가 드롭다운에서 고르고, 없으면 직접 입력할 수 있다.
+const DEFAULT_WORKBOOKS = {
+  HW_YI: ['와이수학 문제집 1권', '와이수학 문제집 2권', '와이수학 문제집 3권', '와이수학 문제집 4권'],
+  HW_HWANGSO: ['황소 수학 A', '황소 수학 B', '황소 수학 심화'],
+  HW_APRAB: ['에이프랩 영어 리딩', '에이프랩 영어 문법', '에이프랩 영어 단어장'],
+  HW_GIPARANG: ['기파랑 국어 독해', '기파랑 국어 어휘'],
+  HW_ETC: ['기타 숙제'],
+  SELF: ['내가 정한 공부', '독서', '오답노트 정리'],
+};
+
+// 단위: 페이지 / 문제
+const UNITS = [
+  { key: 'page', label: '페이지', short: 'p', emoji: '📖' },
+  { key: 'problem', label: '문제', short: '문제', emoji: '✏️' },
+];
+
+// 시간표 설정값
+const SLOT_MINUTE_OPTIONS = [10, 30, 60];
+const DEFAULT_SLOT_MINUTES = 30;
+const TIMETABLE_START_HOUR = 7; // 아침 7시
+const TIMETABLE_MAX_HOUR = 24; // 밤 12시(자정)
+const DEFAULT_END_HOUR = 22;
+
+// 할 일 1개당 기본 소요 시간(분). "할 일 1개 = 30분 분량"이라는 규칙의 근거값.
+const DEFAULT_TASK_MINUTES = 30;
+
+// 하루 목표를 100% 달성했을 때 받는 최대 포인트.
+// 실제 지급액 = 달성률 × MAX_DAILY_PLANNER_POINTS (반올림).
+const MAX_DAILY_PLANNER_POINTS = 100;
+
+const MISS_STRATEGY = {
+  PUSH: 'push', // 못 한 만큼 그대로 내일로 미루기
+  REDISTRIBUTE: 'redistribute', // 남은 기간에 맞춰 n분의 1로 다시 나누기
+};
+
+// ---------------------------------------------------------------------------
+// 2. 날짜 유틸 (전부 'YYYY-MM-DD' 로컬 문자열 기준)
+// ---------------------------------------------------------------------------
+
+function toDateKey(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate()
+  ).padStart(2, '0')}`;
+}
+
+function fromDateKey(key) {
+  const [y, m, d] = String(key).split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+
+function addDays(key, days) {
+  const date = fromDateKey(key);
+  date.setDate(date.getDate() + days);
+  return toDateKey(date);
+}
+
+function compareDateKey(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+const WEEKDAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
+
+function weekdayLabel(key) {
+  return WEEKDAY_LABELS[fromDateKey(key).getDay()];
+}
+
+/**
+ * start~end(양끝 포함) 사이에서 '공부하는 날'만 뽑아 준다.
+ * holidays에 들어 있는 날짜와, 요일 단위 휴일(restWeekdays: [0,6] 등)은 제외한다.
+ */
+function listStudyDates(startDate, endDate, holidays = [], restWeekdays = []) {
+  if (!startDate || !endDate || compareDateKey(startDate, endDate) > 0) return [];
+  const holidaySet = new Set(holidays);
+  const restSet = new Set(restWeekdays.map(Number));
+  const dates = [];
+  let cursor = startDate;
+  // 무한 루프 방지용 상한 (약 2년)
+  for (let guard = 0; guard < 800 && compareDateKey(cursor, endDate) <= 0; guard += 1) {
+    const isHoliday = holidaySet.has(cursor) || restSet.has(fromDateKey(cursor).getDay());
+    if (!isHoliday) dates.push(cursor);
+    cursor = addDays(cursor, 1);
+  }
+  return dates;
+}
+
+// ---------------------------------------------------------------------------
+// 3. 목표량 분배
+// ---------------------------------------------------------------------------
+
+/**
+ * total을 slots개로 최대한 고르게 쪼갠다. 나머지는 앞쪽 날짜부터 1씩 더 얹는다.
+ * 예) distributeAmount(10, 3) -> [4, 3, 3]
+ * 결과 배열의 합은 항상 total과 같다. (아이가 "왜 총합이 안 맞지?" 하는 일이 없도록)
+ */
+function distributeAmount(total, slots) {
+  const amount = Math.max(0, Math.round(Number(total) || 0));
+  const count = Math.max(0, Math.round(Number(slots) || 0));
+  if (count === 0) return [];
+  const base = Math.floor(amount / count);
+  const remainder = amount % count;
+  return Array.from({ length: count }, (_, i) => base + (i < remainder ? 1 : 0));
+}
+
+/**
+ * 목표(goal) 하나를 날짜별 권장량 맵으로 펼친다.
+ *
+ * goal = {
+ *   id, category, workbook, title, unit,
+ *   totalAmount,       // 전체 페이지 수 또는 문제 수
+ *   startAmount,       // (선택) 시작 페이지 번호. 표시용
+ *   startDate, endDate,
+ *   holidays: ['2026-07-28'],   // 아이가 콕 집어 쉬기로 한 날
+ *   restWeekdays: [0],          // 매주 쉬는 요일 (0=일)
+ *   completedAmount,            // 지금까지 실제로 끝낸 양
+ *   strategy,                   // 미달성 처리 방식
+ *   carryOver,                  // PUSH 방식에서 다음 날로 넘어온 밀린 양
+ * }
+ *
+ * @returns {{ [dateKey: string]: number }}
+ */
+function buildGoalSchedule(goal, { fromDate = null } = {}) {
+  if (!goal || !goal.startDate || !goal.endDate) return {};
+  const total = Math.max(0, Math.round(Number(goal.totalAmount) || 0));
+  const done = Math.max(0, Math.round(Number(goal.completedAmount) || 0));
+  const carryOver = Math.max(0, Math.round(Number(goal.carryOver) || 0));
+  const remainingTotal = Math.max(0, total - done);
+  // 밀린 분량(carryOver)은 아직 안 끝낸 양이라 remainingTotal에 이미 포함돼 있다.
+  // 첫날에 따로 얹을 것이므로 나머지 날에 나눌 때는 빼 둔다. (이중 계산 방지)
+  const spreadTotal = Math.max(0, remainingTotal - carryOver);
+
+  // 목표 전체 기간의 공부일. PUSH 방식에서 "원래 정한 하루치"의 기준이 된다.
+  const allDates = listStudyDates(goal.startDate, goal.endDate, goal.holidays, goal.restWeekdays);
+  // 오늘(또는 fromDate) 이후 남은 공부 가능일
+  const anchor = fromDate && compareDateKey(fromDate, goal.startDate) > 0 ? fromDate : goal.startDate;
+  const dates = allDates.filter((d) => compareDateKey(d, anchor) >= 0);
+  if (dates.length === 0) return {};
+
+  let amounts;
+  if (goal.strategy === MISS_STRATEGY.PUSH) {
+    // 미루기 방식: 처음 정한 하루치를 그대로 지킨다. 밀린 양만 첫날에 몰아서 얹는다.
+    const baseline = distributeAmount(total, allDates.length);
+    amounts = trimToTotal(baseline.slice(allDates.length - dates.length), spreadTotal);
+  } else {
+    // 재계산 방식: 남은 분량을 남은 날에 다시 n분의 1 한다.
+    amounts = distributeAmount(spreadTotal, dates.length);
+  }
+
+  const schedule = {};
+  dates.forEach((date, index) => {
+    schedule[date] = amounts[index] ?? 0;
+  });
+  if (carryOver > 0) schedule[dates[0]] += carryOver;
+  return schedule;
+}
+
+/** 배열의 합이 cap을 넘지 않도록 뒤쪽 날짜부터 깎는다. (계획을 앞당겨 끝냈을 때 대비) */
+function trimToTotal(amounts, cap) {
+  const next = [...amounts];
+  let excess = next.reduce((sum, v) => sum + v, 0) - Math.max(0, cap);
+  for (let i = next.length - 1; i >= 0 && excess > 0; i -= 1) {
+    const cut = Math.min(next[i], excess);
+    next[i] -= cut;
+    excess -= cut;
+  }
+  return next;
+}
+
+/** 특정 날짜에 이 목표로 해야 할 권장량 */
+function getDailyQuota(goal, dateKey, options = {}) {
+  const schedule = buildGoalSchedule(goal, options);
+  return schedule[dateKey] ?? 0;
+}
+
+/**
+ * 목표 진행 요약. 진행바/응원 문구에 쓴다.
+ */
+function summarizeGoal(goal, todayKey = toDateKey()) {
+  const total = Math.max(0, Math.round(Number(goal?.totalAmount) || 0));
+  const done = Math.min(total, Math.max(0, Math.round(Number(goal?.completedAmount) || 0)));
+  const remaining = total - done;
+  const remainingDays = listStudyDates(
+    compareDateKey(todayKey, goal?.startDate ?? todayKey) > 0 ? todayKey : goal?.startDate,
+    goal?.endDate,
+    goal?.holidays,
+    goal?.restWeekdays
+  ).length;
+  return {
+    total,
+    done,
+    remaining,
+    remainingDays,
+    progressRate: total > 0 ? done / total : 0,
+    perDay: remainingDays > 0 ? Math.ceil(remaining / remainingDays) : remaining,
+    isFinished: total > 0 && done >= total,
+    isOverdue: remainingDays === 0 && remaining > 0,
+  };
+}
+
+/**
+ * 오늘 목표를 다 못 끝냈을 때의 재계산.
+ *
+ * - PUSH:         못 한 만큼(shortfall)을 통째로 다음 공부일에 얹는다. 나머지 날은 그대로.
+ * - REDISTRIBUTE: 남은 전체 분량을 남은 공부일 수로 다시 n분의 1 한다. 하루가 조금씩 늘어난다.
+ *
+ * @returns {{ goal, schedule, shortfall, nextDate, beforePerDay, afterPerDay }}
+ */
+function recalcAfterMiss(goal, todayKey, plannedAmount, doneAmount, strategy) {
+  const planned = Math.max(0, Math.round(Number(plannedAmount) || 0));
+  const finished = Math.max(0, Math.round(Number(doneAmount) || 0));
+  const shortfall = Math.max(0, planned - finished);
+  const nextDate = nextStudyDate(goal, todayKey);
+
+  const beforeSchedule = buildGoalSchedule(goal, { fromDate: todayKey });
+  const beforePerDay = nextDate ? beforeSchedule[nextDate] ?? 0 : 0;
+
+  if (shortfall === 0 || !nextDate) {
+    return {
+      goal: { ...goal, carryOver: 0 },
+      schedule: buildGoalSchedule({ ...goal, carryOver: 0 }, { fromDate: nextDate ?? todayKey }),
+      shortfall,
+      nextDate,
+      beforePerDay,
+      afterPerDay: beforePerDay,
+    };
+  }
+
+  const nextGoal =
+    strategy === MISS_STRATEGY.PUSH
+      ? { ...goal, carryOver: Math.max(0, Number(goal.carryOver) || 0) + shortfall, strategy }
+      : { ...goal, carryOver: 0, strategy };
+
+  const schedule = buildGoalSchedule(nextGoal, { fromDate: nextDate });
+  return {
+    goal: nextGoal,
+    schedule,
+    shortfall,
+    nextDate,
+    beforePerDay,
+    afterPerDay: schedule[nextDate] ?? 0,
+  };
+}
+
+/** 오늘 다음으로 공부하는 날 (휴일 건너뜀). 기간이 끝났으면 null */
+function nextStudyDate(goal, todayKey) {
+  const dates = listStudyDates(
+    addDays(todayKey, 1),
+    goal?.endDate,
+    goal?.holidays,
+    goal?.restWeekdays
+  );
+  return dates.length > 0 ? dates[0] : null;
+}
+
+/**
+ * 목표 목록에서 특정 날짜의 할 일 후보를 만들어 준다.
+ * 아이가 "오늘 할 일 자동으로 담기" 버튼을 눌렀을 때 쓰인다.
+ */
+function buildTasksForDate(goals = [], dateKey) {
+  return goals
+    .map((goal) => {
+      const amount = getDailyQuota(goal, dateKey, { fromDate: dateKey });
+      if (amount <= 0) return null;
+      const category = CATEGORIES.find((c) => c.key === goal.category);
+      return {
+        id: `${goal.id}-${dateKey}`,
+        goalId: goal.id,
+        category: goal.category,
+        subject: category?.subject ?? '기타',
+        workbook: goal.workbook,
+        title: goal.title || goal.workbook,
+        unit: goal.unit || 'page',
+        amount,
+        doneAmount: 0,
+        done: false,
+        minutes: DEFAULT_TASK_MINUTES,
+      };
+    })
+    .filter(Boolean);
+}
+
+// ---------------------------------------------------------------------------
+// 4. 시간표
+// ---------------------------------------------------------------------------
+
+/**
+ * 아침 7시부터 아이가 정한 종료 시각까지, slotMinutes 단위의 빈칸을 만든다.
+ * @returns [{ index, startMinutes, endMinutes, label }]
+ */
+function buildTimeSlots(endHour = DEFAULT_END_HOUR, slotMinutes = DEFAULT_SLOT_MINUTES) {
+  const step = SLOT_MINUTE_OPTIONS.includes(Number(slotMinutes))
+    ? Number(slotMinutes)
+    : DEFAULT_SLOT_MINUTES;
+  const end = Math.min(TIMETABLE_MAX_HOUR, Math.max(TIMETABLE_START_HOUR + 1, Number(endHour) || DEFAULT_END_HOUR));
+  const startMin = TIMETABLE_START_HOUR * 60;
+  const endMin = end * 60;
+  const slots = [];
+  for (let m = startMin, index = 0; m < endMin; m += step, index += 1) {
+    slots.push({
+      index,
+      startMinutes: m,
+      endMinutes: Math.min(m + step, endMin),
+      label: formatMinutes(m),
+      endLabel: formatMinutes(Math.min(m + step, endMin)),
+    });
+  }
+  return slots;
+}
+
+function formatMinutes(totalMinutes) {
+  const m = Math.max(0, Math.round(Number(totalMinutes) || 0));
+  const hour = Math.floor(m / 60) % 24;
+  const minute = m % 60;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+/** 지금 시각이 몇 번째 슬롯인지. 시간표 진입 시 자동 스크롤 위치 계산에 쓴다. */
+function currentSlotIndex(slots = [], now = new Date()) {
+  if (slots.length === 0) return 0;
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  if (nowMinutes <= slots[0].startMinutes) return 0;
+  const found = slots.findIndex((slot) => nowMinutes >= slot.startMinutes && nowMinutes < slot.endMinutes);
+  return found >= 0 ? found : slots.length - 1;
+}
+
+/** 할 일 1개당 기본 30분 → 슬롯 몇 칸을 차지하는지 */
+function slotSpanForTask(task, slotMinutes = DEFAULT_SLOT_MINUTES) {
+  const minutes = Math.max(slotMinutes, Number(task?.minutes) || DEFAULT_TASK_MINUTES);
+  return Math.max(1, Math.round(minutes / slotMinutes));
+}
+
+// ---------------------------------------------------------------------------
+// 5. 통계 & 포인트
+// ---------------------------------------------------------------------------
+
+/**
+ * 오늘의 공부 통계. 과목 비중 차트와 "몇 페이지 / 몇 문제" 요약에 그대로 꽂아 쓴다.
+ */
+function calcDayStats(tasks = []) {
+  const bySubject = {};
+  SUBJECTS.forEach((subject) => {
+    bySubject[subject] = { planned: 0, done: 0, minutes: 0, count: 0 };
+  });
+
+  let plannedPages = 0;
+  let donePages = 0;
+  let plannedProblems = 0;
+  let doneProblems = 0;
+  let plannedTotal = 0;
+  let doneTotal = 0;
+  let doneCount = 0;
+
+  tasks.forEach((task) => {
+    const category = CATEGORIES.find((c) => c.key === task.category);
+    const subject = task.subject ?? category?.subject ?? '기타';
+    const planned = Math.max(0, Number(task.amount) || 0);
+    const done = task.done
+      ? Math.max(0, Number(task.doneAmount) || planned)
+      : Math.max(0, Number(task.doneAmount) || 0);
+
+    if (!bySubject[subject]) bySubject[subject] = { planned: 0, done: 0, minutes: 0, count: 0 };
+    bySubject[subject].planned += planned;
+    bySubject[subject].done += done;
+    bySubject[subject].minutes += Number(task.minutes) || DEFAULT_TASK_MINUTES;
+    bySubject[subject].count += 1;
+
+    plannedTotal += planned;
+    doneTotal += Math.min(done, planned);
+    if (task.done) doneCount += 1;
+
+    if (task.unit === 'problem') {
+      plannedProblems += planned;
+      doneProblems += done;
+    } else {
+      plannedPages += planned;
+      donePages += done;
+    }
+  });
+
+  const achievementRate = plannedTotal > 0 ? Math.min(1, doneTotal / plannedTotal) : 0;
+
+  // 원형 차트용: 계획된 분량 기준 과목 비중(%)
+  const subjectShares = SUBJECTS.map((subject) => {
+    const entry = bySubject[subject] ?? { planned: 0, done: 0, minutes: 0, count: 0 };
+    return {
+      subject,
+      color: SUBJECT_COLORS[subject],
+      planned: entry.planned,
+      done: entry.done,
+      minutes: entry.minutes,
+      count: entry.count,
+      plannedShare: plannedTotal > 0 ? entry.planned / plannedTotal : 0,
+      doneShare: doneTotal > 0 ? entry.done / doneTotal : 0,
+    };
+  }).filter((entry) => entry.count > 0);
+
+  return {
+    taskCount: tasks.length,
+    doneCount,
+    plannedTotal,
+    doneTotal,
+    achievementRate,
+    plannedPages,
+    donePages,
+    plannedProblems,
+    doneProblems,
+    totalMinutes: tasks.reduce((sum, t) => sum + (Number(t.minutes) || DEFAULT_TASK_MINUTES), 0),
+    bySubject,
+    subjectShares,
+  };
+}
+
+/**
+ * 달성률 기반 포인트. 하루 목표를 전부 끝내면 MAX_DAILY_PLANNER_POINTS(100P).
+ * 계획을 몇 개 세웠는지와 무관하게 "오늘 정한 걸 얼마나 해냈나"만 본다.
+ */
+function calcPlannerPoints(tasks = [], maxPoints = MAX_DAILY_PLANNER_POINTS) {
+  const { achievementRate, plannedTotal } = calcDayStats(tasks);
+  if (plannedTotal === 0) return 0;
+  return Math.round(achievementRate * maxPoints);
+}
+
+/**
+ * 이미 지급한 포인트를 빼고, 이번에 추가로 줄 포인트만 계산한다.
+ * (아이가 체크했다 풀었다 반복해도 포인트가 중복 지급되지 않는다.)
+ */
+function calcPointDelta(tasks = [], alreadyAwarded = 0) {
+  const earned = calcPlannerPoints(tasks);
+  return Math.max(0, earned - Math.max(0, Math.round(Number(alreadyAwarded) || 0)));
+}
+
+/** 달성률에 맞춘 강아지 응원 문구 */
+function cheerMessage(rate) {
+  if (rate >= 1) return '오늘 계획 전부 완료! 최고의 하루였어요 🐶🎉';
+  if (rate >= 0.7) return '거의 다 왔어요! 조금만 더 힘내요 🐾';
+  if (rate >= 0.4) return '절반쯤 왔어요. 잘하고 있어요 🐕';
+  if (rate > 0) return '시작이 반이에요! 하나씩 해봐요 🐶';
+  return '오늘 할 일을 골라서 시간표에 담아 볼까요? 🦴';
+}
+
+// ---------------------------------------------------------------------------
+// 6. 하루 계획 기본값
+// ---------------------------------------------------------------------------
+
+function createEmptyDayPlan(dateKey = toDateKey()) {
+  return {
+    date: dateKey,
+    slotMinutes: DEFAULT_SLOT_MINUTES,
+    endHour: DEFAULT_END_HOUR,
+    setupDone: false, // 단위/종료시각을 아직 고르지 않은 상태
+    tasks: [],
+    assignments: {}, // { [slotIndex]: taskId }
+    pointsAwarded: 0,
+    closed: false, // 하루 마감(결과 체크) 완료 여부
+  };
+}
+
+function createTask(partial = {}) {
+  const category = CATEGORIES.find((c) => c.key === partial.category) ?? CATEGORIES[0];
+  return {
+    id: partial.id ?? `task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    goalId: partial.goalId ?? null,
+    category: category.key,
+    subject: category.subject,
+    workbook: partial.workbook ?? DEFAULT_WORKBOOKS[category.key]?.[0] ?? '',
+    title: partial.title ?? '',
+    unit: partial.unit ?? 'page',
+    amount: Math.max(0, Math.round(Number(partial.amount) || 0)),
+    doneAmount: 0,
+    done: false,
+    minutes: Number(partial.minutes) || DEFAULT_TASK_MINUTES,
+  };
+}
+
+function createGoal(partial = {}) {
+  const today = toDateKey();
+  const category = CATEGORIES.find((c) => c.key === partial.category) ?? CATEGORIES[0];
+  return {
+    id: partial.id ?? `goal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    category: category.key,
+    workbook: partial.workbook ?? DEFAULT_WORKBOOKS[category.key]?.[0] ?? '',
+    title: partial.title ?? '',
+    unit: partial.unit ?? 'page',
+    totalAmount: Math.max(0, Math.round(Number(partial.totalAmount) || 0)),
+    completedAmount: 0,
+    startDate: partial.startDate ?? today,
+    endDate: partial.endDate ?? addDays(today, 13),
+    holidays: partial.holidays ?? [],
+    restWeekdays: partial.restWeekdays ?? [],
+    strategy: partial.strategy ?? MISS_STRATEGY.REDISTRIBUTE,
+    carryOver: 0,
+  };
+}
+
+
+// 동물 캐릭터 마스코트: 구글 드라이브 CDN의 투명 PNG(@/lib/characters)를 장식용으로 배치한다.
+// - height로 크기를 정하고 가로세로 비율은 원본 그대로 유지한다.
+// - animate: 'bob'(위아래로 둥실) | 'wiggle'(좌우로 살랑) | 'none'
+// - delay: 여러 마리를 나란히 둘 때 애니메이션 시작을 어긋나게 해 자연스럽게 보이게 한다.
+// - flip: 좌우 반전 (애니메이션 transform과 충돌하지 않도록 바깥 span에 적용)
+function CharacterMascot({
+  name,
+  height = 72,
+  animate = 'bob',
+  delay = 0,
+  flip = false,
+  className = '',
+  style = {},
+}) {
+  const character = CHARACTERS[name];
+  if (!character) return null;
+
+  const animationClass =
+    animate === 'bob'
+      ? 'animate-mascot-bob'
+      : animate === 'wiggle'
+        ? 'animate-mascot-wiggle'
+        : '';
+
+  // 원본 비율(naturalWidth/naturalHeight)로 렌더 너비를 미리 계산해 <img>에 width/height를
+  // 명시한다. 원격 이미지가 도착하기 전에도 브라우저가 정확한 자리를 잡아 레이아웃이 밀리지 않는다.
+  const width = Math.round((height * character.naturalWidth) / character.naturalHeight);
+
+  return (
+    <span
+      className={`inline-block leading-none ${flip ? 'scale-x-[-1]' : ''} ${className}`}
+      style={style}
+      aria-hidden={character.alt ? undefined : true}
+    >
+      {/* next/image 대신 순수 img: 장식용이라 최적화보다 단순함이 우선이고, 구글 드라이브 원격 링크를 그대로 쓴다. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={character.src}
+        alt={character.alt}
+        width={width}
+        height={height}
+        draggable={false}
+        style={{ height, width, animationDelay: delay ? `${delay}ms` : undefined }}
+        className={`pointer-events-none max-w-none select-none object-contain drop-shadow-sm ${animationClass}`}
+      />
+    </span>
+  );
+}
+
+
+// ---- 미리보기용 스텁: 실제 앱에서는 구글 시트를 호출하는 자리 ----
+const KEY='planner-preview';
+const readPlannerCache =()=>{try{return JSON.parse(localStorage.getItem(KEY))}catch{return null}};
+const writePlannerCache=(u,s)=>{try{localStorage.setItem(KEY,JSON.stringify(s))}catch{}};
+const fetchPlanner=async()=>({planner:readPlannerCache()??SEED});
+const savePlanner=async()=>({status:'success'});
+const awardPlannerPoints=async()=>({status:'success'});
+
+const T=toDateKey();
+const SEED={
+  goals:[
+    {...createGoal({category:'HW_YI',workbook:'와이수학 문제집 2권',title:'와이수학 2권 끝내기',unit:'page',totalAmount:120,startDate:addDays(T,-4),endDate:addDays(T,9)}),completedAmount:36},
+    {...createGoal({category:'HW_APRAB',workbook:'에이프랩 영어 리딩',title:'영어 리딩 1단원',unit:'problem',totalAmount:80,startDate:addDays(T,-2),endDate:addDays(T,5)}),completedAmount:20},
+    {...createGoal({category:'HW_GIPARANG',workbook:'기파랑 국어 독해',title:'국어 독해 매일 조금씩',unit:'page',totalAmount:60,startDate:addDays(T,-1),endDate:addDays(T,11),restWeekdays:[0]}),completedAmount:5},
+  ],
+  days:{}
+};
+SEED.days[T]={...createEmptyDayPlan(T),slotMinutes:30,endHour:21,setupDone:true,
+  tasks:buildTasksForDate(SEED.goals,T).map((t,i)=>i===0?{...t,done:true,doneAmount:t.amount}:i===1?{...t,doneAmount:Math.floor(t.amount/2)}:t),
+  assignments:{}};
+const st=SEED.days[T]; if(st.tasks[0])st.assignments[4]=st.tasks[0].id; if(st.tasks[1])st.assignments[9]=st.tasks[1].id; if(st.tasks[2])st.assignments[20]=st.tasks[2].id;
+
+
+
+
+
+
+const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+
+// ---------------------------------------------------------------------------
+// 작은 UI 조각들
+// ---------------------------------------------------------------------------
+
+function Card({ children, className = '' }) {
+  return (
+    <section
+      className={`rounded-[2rem] border-4 border-white bg-white p-4 shadow-xl shadow-amber-100/70 md:p-5 ${className}`}
+    >
+      {children}
+    </section>
+  );
+}
+
+function SectionTitle({ emoji, title, subtitle, right }) {
+  return (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <p className="text-xs font-bold text-rose-400">{subtitle}</p>
+        <h3 className="text-lg font-extrabold text-stone-700">
+          {emoji} {title}
+        </h3>
+      </div>
+      {right}
+    </div>
+  );
+}
+
+function PillButton({ active, children, className = '', ...props }) {
+  return (
+    <button
+      type="button"
+      className={`rounded-full px-4 py-2 text-sm font-bold transition ${
+        active
+          ? 'bg-rose-400 text-white shadow-md shadow-rose-200'
+          : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+      } ${className}`}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** 과목 비중 도넛 차트 (외부 라이브러리 없이 SVG로 직접 그린다) */
+function SubjectDonut({ shares, mode = 'planned', size = 148 }) {
+  const key = mode === 'done' ? 'doneShare' : 'plannedShare';
+  const visible = shares.filter((s) => s[key] > 0);
+  const total = visible.reduce((sum, s) => sum + s[key], 0);
+  const radius = size / 2 - 12;
+  const circumference = 2 * Math.PI * radius;
+
+  if (total <= 0) {
+    return (
+      <div
+        className="flex items-center justify-center rounded-full border-8 border-amber-100 text-center text-xs font-bold text-stone-400"
+        style={{ width: size, height: size }}
+      >
+        아직 기록이
+        <br />
+        없어요 🐾
+      </div>
+    );
+  }
+
+  let offset = 0;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label="과목 비중">
+      <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#FEF3C7" strokeWidth="18" />
+      {visible.map((share) => {
+        const ratio = share[key] / total;
+        const dash = ratio * circumference;
+        const el = (
+          <circle
+            key={share.subject}
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke={share.color}
+            strokeWidth="18"
+            strokeLinecap="butt"
+            strokeDasharray={`${dash} ${circumference - dash}`}
+            strokeDashoffset={-offset}
+            transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          />
+        );
+        offset += dash;
+        return el;
+      })}
+      <text
+        x="50%"
+        y="47%"
+        textAnchor="middle"
+        className="fill-stone-500"
+        style={{ fontSize: 12, fontWeight: 700 }}
+      >
+        과목 비중
+      </text>
+      <text x="50%" y="66%" textAnchor="middle" style={{ fontSize: 20 }}>
+        🐶
+      </text>
+    </svg>
+  );
+}
+
+/** 달성률 원형 게이지 */
+function AchievementRing({ rate, size = 116 }) {
+  const radius = size / 2 - 10;
+  const circumference = 2 * Math.PI * radius;
+  const dash = Math.min(1, Math.max(0, rate)) * circumference;
+  return (
+    <div className="relative" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#FFE4E6" strokeWidth="14" />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="#FB7185"
+          strokeWidth="14"
+          strokeLinecap="round"
+          strokeDasharray={`${dash} ${circumference - dash}`}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-2xl font-extrabold text-rose-500">{Math.round(rate * 100)}%</span>
+        <span className="text-[10px] font-bold text-stone-400">오늘 달성률</span>
+      </div>
+    </div>
+  );
+}
+
+function Modal({ title, subtitle, onClose, children, maxWidth = 'max-w-lg' }) {
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className={`w-full ${maxWidth} overflow-hidden rounded-[2rem] border-4 border-white bg-amber-50 shadow-2xl`}>
+        <div className="flex items-center gap-3 bg-gradient-to-r from-rose-100 to-amber-100 p-5">
+          <span className="text-3xl">🐶</span>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold text-rose-500">{subtitle}</p>
+            <h2 className="text-xl font-extrabold text-stone-700">{title}</h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full bg-white px-4 py-2 text-sm font-bold text-rose-500 shadow-sm hover:bg-rose-50"
+          >
+            닫기 ✕
+          </button>
+        </div>
+        <div className="max-h-[70vh] overflow-y-auto p-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 메인 컴포넌트
+// ---------------------------------------------------------------------------
+
+function StudyPlanner({ userName, onPointsAwarded }) {
+  const todayKey = toDateKey();
+  const [date, setDate] = useState(todayKey);
+  const [planner, setPlanner] = useState(() => ({ goals: [], days: {} }));
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState(null);
+
+  const [goalModalOpen, setGoalModalOpen] = useState(false);
+  const [taskModalOpen, setTaskModalOpen] = useState(false);
+  const [slotPickerIndex, setSlotPickerIndex] = useState(null);
+  const [missModal, setMissModal] = useState(null);
+  const [statsMode, setStatsMode] = useState('planned');
+
+  const timetableRef = useRef(null);
+  const saveTimerRef = useRef(null);
+  const loadedRef = useRef(false);
+
+  // ---- 로딩 -------------------------------------------------------------
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const cached = readPlannerCache(userName);
+      if (cached && alive) setPlanner(normalizePlanner(cached));
+      const { planner: remote, error } = await fetchPlanner(userName);
+      if (!alive) return;
+      if (remote) setPlanner(normalizePlanner(remote));
+      if (error && !remote) setNotice('오프라인 상태예요. 계획은 이 기기에 저장할게요 🐾');
+      setLoading(false);
+      loadedRef.current = true;
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [userName]);
+
+  // ---- 자동 저장(디바운스) -----------------------------------------------
+  const persist = useCallback(
+    (next) => {
+      writePlannerCache(userName, next);
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(async () => {
+        setSaving(true);
+        try {
+          await savePlanner(next, userName);
+        } catch {
+          setNotice('저장이 늦어지고 있어요. 계획은 안전하게 보관 중이에요 🐾');
+        } finally {
+          setSaving(false);
+        }
+      }, 800);
+    },
+    [userName]
+  );
+
+  const update = useCallback(
+    (recipe) => {
+      setPlanner((prev) => {
+        const next = recipe(prev);
+        if (loadedRef.current) persist(next);
+        return next;
+      });
+    },
+    [persist]
+  );
+
+  const day = planner.days[date] ?? createEmptyDayPlan(date);
+  const goals = planner.goals ?? [];
+
+  const setDay = useCallback(
+    (recipe) => {
+      update((prev) => {
+        const current = prev.days[date] ?? createEmptyDayPlan(date);
+        return { ...prev, days: { ...prev.days, [date]: recipe(current) } };
+      });
+    },
+    [date, update]
+  );
+
+  // ---- 파생값 -----------------------------------------------------------
+  const slots = useMemo(
+    () => buildTimeSlots(day.endHour, day.slotMinutes),
+    [day.endHour, day.slotMinutes]
+  );
+  const stats = useMemo(() => calcDayStats(day.tasks), [day.tasks]);
+  const tasksById = useMemo(
+    () => Object.fromEntries(day.tasks.map((t) => [t.id, t])),
+    [day.tasks]
+  );
+  const assignedTaskIds = useMemo(
+    () => new Set(Object.values(day.assignments ?? {})),
+    [day.assignments]
+  );
+
+  // 시간표 진입 시 현재 시각으로 스크롤
+  useEffect(() => {
+    if (!day.setupDone || slots.length === 0 || date !== todayKey) return;
+    const container = timetableRef.current;
+    if (!container) return;
+    const index = currentSlotIndex(slots);
+    const row = container.querySelector(`[data-slot="${index}"]`);
+    if (row) {
+      container.scrollTop = Math.max(0, row.offsetTop - container.clientHeight / 3);
+    }
+  }, [day.setupDone, slots, date, todayKey]);
+
+  // ---- 액션 -------------------------------------------------------------
+
+  const handleAutoFill = () => {
+    const generated = buildTasksForDate(goals, date);
+    if (generated.length === 0) {
+      setNotice('오늘 배정할 목표가 없어요. 먼저 기간 목표를 만들어 볼까요? 🦴');
+      return;
+    }
+    setDay((prev) => {
+      const existingGoalIds = new Set(prev.tasks.map((t) => t.goalId).filter(Boolean));
+      const fresh = generated.filter((t) => !existingGoalIds.has(t.goalId));
+      return { ...prev, tasks: [...prev.tasks, ...fresh] };
+    });
+    setNotice(null);
+  };
+
+  const handleAddTask = (draft) => {
+    setDay((prev) => ({ ...prev, tasks: [...prev.tasks, createTask(draft)] }));
+    setTaskModalOpen(false);
+  };
+
+  const handleRemoveTask = (taskId) => {
+    setDay((prev) => ({
+      ...prev,
+      tasks: prev.tasks.filter((t) => t.id !== taskId),
+      assignments: Object.fromEntries(
+        Object.entries(prev.assignments ?? {}).filter(([, id]) => id !== taskId)
+      ),
+    }));
+  };
+
+  const handleToggleTask = (taskId) => {
+    setDay((prev) => ({
+      ...prev,
+      tasks: prev.tasks.map((t) =>
+        t.id === taskId
+          ? { ...t, done: !t.done, doneAmount: !t.done ? t.amount : 0 }
+          : t
+      ),
+    }));
+  };
+
+  const handleChangeDoneAmount = (taskId, value) => {
+    setDay((prev) => ({
+      ...prev,
+      tasks: prev.tasks.map((t) => {
+        if (t.id !== taskId) return t;
+        const doneAmount = Math.max(0, Math.min(t.amount, Math.round(Number(value) || 0)));
+        return { ...t, doneAmount, done: doneAmount >= t.amount && t.amount > 0 };
+      }),
+    }));
+  };
+
+  const handleAssignSlot = (slotIndex, taskId) => {
+    setDay((prev) => {
+      const next = { ...(prev.assignments ?? {}) };
+      // 같은 할 일이 다른 칸에 이미 있으면 옮기는 것으로 처리한다.
+      Object.keys(next).forEach((key) => {
+        if (next[key] === taskId) delete next[key];
+      });
+      if (taskId) next[slotIndex] = taskId;
+      else delete next[slotIndex];
+      return { ...prev, assignments: next };
+    });
+    setSlotPickerIndex(null);
+  };
+
+  const handleAddGoal = (draft) => {
+    update((prev) => ({ ...prev, goals: [...prev.goals, createGoal(draft)] }));
+    setGoalModalOpen(false);
+  };
+
+  const handleRemoveGoal = (goalId) => {
+    update((prev) => ({ ...prev, goals: prev.goals.filter((g) => g.id !== goalId) }));
+  };
+
+  const handleToggleHoliday = (goalId, dateKey) => {
+    update((prev) => ({
+      ...prev,
+      goals: prev.goals.map((g) => {
+        if (g.id !== goalId) return g;
+        const holidays = new Set(g.holidays ?? []);
+        if (holidays.has(dateKey)) holidays.delete(dateKey);
+        else holidays.add(dateKey);
+        return { ...g, holidays: [...holidays].sort() };
+      }),
+    }));
+  };
+
+  const handleToggleRestWeekday = (goalId, weekday) => {
+    update((prev) => ({
+      ...prev,
+      goals: prev.goals.map((g) => {
+        if (g.id !== goalId) return g;
+        const rest = new Set(g.restWeekdays ?? []);
+        if (rest.has(weekday)) rest.delete(weekday);
+        else rest.add(weekday);
+        return { ...g, restWeekdays: [...rest].sort() };
+      }),
+    }));
+  };
+
+  // 하루 마감: 포인트 지급 + 목표 진행도 반영 + 미달성 처리 안내
+  const handleCloseDay = async () => {
+    if (day.tasks.length === 0) {
+      setNotice('오늘 할 일이 없어요. 먼저 계획을 세워 볼까요? 🐾');
+      return;
+    }
+    const delta = calcPointDelta(day.tasks, day.pointsAwarded);
+    const earned = calcPlannerPoints(day.tasks);
+
+    // 완료한 만큼 각 목표의 누적 진행도에 더한다.
+    update((prev) => {
+      const gains = {};
+      day.tasks.forEach((t) => {
+        if (!t.goalId) return;
+        const done = t.done ? t.amount : Math.max(0, Number(t.doneAmount) || 0);
+        gains[t.goalId] = (gains[t.goalId] || 0) + done;
+      });
+      const prevAwarded = prev.days[date]?.pointsAwarded ?? 0;
+      const prevGains = prev.days[date]?.appliedGains ?? {};
+      return {
+        ...prev,
+        goals: prev.goals.map((g) =>
+          gains[g.id] != null
+            ? {
+                ...g,
+                // 재마감해도 중복 누적되지 않도록 이전에 반영한 양을 뺀다.
+                completedAmount: Math.max(
+                  0,
+                  (Number(g.completedAmount) || 0) - (prevGains[g.id] || 0) + gains[g.id]
+                ),
+              }
+            : g
+        ),
+        days: {
+          ...prev.days,
+          [date]: {
+            ...(prev.days[date] ?? createEmptyDayPlan(date)),
+            closed: true,
+            pointsAwarded: Math.max(prevAwarded, earned),
+            appliedGains: gains,
+          },
+        },
+      };
+    });
+
+    if (delta > 0) {
+      try {
+        await awardPlannerPoints(date, delta, stats.achievementRate, userName);
+        onPointsAwarded?.(delta, date);
+        setNotice(`오늘 계획 ${Math.round(stats.achievementRate * 100)}% 달성! 💰 ${delta}P 받았어요 🎉`);
+      } catch {
+        onPointsAwarded?.(delta, date);
+        setNotice(`💰 ${delta}P 획득! (서버 반영은 잠시 후 다시 시도할게요 🐾)`);
+      }
+    } else {
+      setNotice('오늘 기록을 저장했어요 🐾');
+    }
+
+    // 못 끝낸 목표가 있으면 처리 방법을 묻는다.
+    const missed = day.tasks.filter(
+      (t) => t.goalId && (t.done ? t.amount : Number(t.doneAmount) || 0) < t.amount
+    );
+    if (missed.length > 0) setMissModal({ tasks: missed });
+  };
+
+  const handleApplyMissStrategy = (strategy) => {
+    update((prev) => {
+      let nextGoals = prev.goals;
+      (missModal?.tasks ?? []).forEach((task) => {
+        nextGoals = nextGoals.map((g) => {
+          if (g.id !== task.goalId) return g;
+          const done = task.done ? task.amount : Number(task.doneAmount) || 0;
+          const { goal } = recalcAfterMiss(g, date, task.amount, done, strategy);
+          return goal;
+        });
+      });
+      return { ...prev, goals: nextGoals };
+    });
+    setMissModal(null);
+    setNotice(
+      strategy === MISS_STRATEGY.PUSH
+        ? '못 한 만큼 내일로 옮겼어요. 내일 조금만 더 힘내요! 🐶'
+        : '남은 기간에 맞춰 골고루 다시 나눴어요. 부담 없이 가요 🐾'
+    );
+  };
+
+  // ---- 렌더 -------------------------------------------------------------
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center gap-4 py-20">
+        <CharacterMascot name="chick" height={64} />
+        <p className="text-lg text-amber-700">🐾 오늘의 계획을 가져오는 중...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-4">
+      {/* 상단: 날짜 + 달성률 + 통계 */}
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <CharacterMascot name="hedgehog" height={54} />
+            <div>
+              <p className="text-xs font-bold text-rose-400">🐾 오늘 내가 정한 계획, 내가 해내기</p>
+              <h2 className="text-2xl font-extrabold text-stone-700">📝 나의 스터디 플래너</h2>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setDate(addDays(date, -1))}
+              className="rounded-full bg-amber-100 px-4 py-2 font-extrabold text-amber-700 hover:bg-amber-200"
+              aria-label="어제"
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              onClick={() => setDate(todayKey)}
+              className="min-w-44 rounded-full bg-rose-400 px-5 py-2 text-sm font-extrabold text-white shadow-md"
+            >
+              {date} ({weekdayLabel(date)}) {date === todayKey ? '· 오늘' : ''}
+            </button>
+            <button
+              type="button"
+              onClick={() => setDate(addDays(date, 1))}
+              className="rounded-full bg-amber-100 px-4 py-2 font-extrabold text-amber-700 hover:bg-amber-200"
+              aria-label="내일"
+            >
+              ›
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 md:grid-cols-[auto_auto_1fr]">
+          <div className="flex items-center justify-center">
+            <AchievementRing rate={stats.achievementRate} />
+          </div>
+          <div className="flex flex-col items-center justify-center gap-2">
+            <SubjectDonut shares={stats.subjectShares} mode={statsMode} />
+            <div className="flex gap-1">
+              <PillButton
+                active={statsMode === 'planned'}
+                onClick={() => setStatsMode('planned')}
+                className="px-3 py-1 text-xs"
+              >
+                계획
+              </PillButton>
+              <PillButton
+                active={statsMode === 'done'}
+                onClick={() => setStatsMode('done')}
+                className="px-3 py-1 text-xs"
+              >
+                완료
+              </PillButton>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <StatBox emoji="📖" label="공부한 페이지" value={`${stats.donePages} / ${stats.plannedPages}p`} tone="rose" />
+            <StatBox emoji="✏️" label="푼 문제" value={`${stats.doneProblems} / ${stats.plannedProblems}문제`} tone="sky" />
+            <StatBox emoji="✅" label="끝낸 할 일" value={`${stats.doneCount} / ${stats.taskCount}개`} tone="emerald" />
+            <StatBox emoji="⏱️" label="계획한 시간" value={`${Math.round(stats.totalMinutes / 60 * 10) / 10}시간`} tone="violet" />
+            <StatBox emoji="💰" label="예상 포인트" value={`${calcPlannerPoints(day.tasks)}P / ${MAX_DAILY_PLANNER_POINTS}P`} tone="amber" />
+            <div className="col-span-2 flex items-center justify-center rounded-2xl bg-gradient-to-r from-rose-50 to-amber-50 p-3 text-center text-sm font-bold text-rose-500 sm:col-span-1">
+              {cheerMessage(stats.achievementRate)}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {stats.subjectShares.map((share) => (
+            <span
+              key={share.subject}
+              className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-stone-600"
+            >
+              <span className="h-3 w-3 rounded-full" style={{ backgroundColor: share.color }} />
+              {share.subject} {Math.round((statsMode === 'done' ? share.doneShare : share.plannedShare) * 100)}%
+            </span>
+          ))}
+          {saving && <span className="text-xs font-bold text-stone-400">저장 중... 🐾</span>}
+        </div>
+
+        {notice && (
+          <p className="mt-3 rounded-2xl bg-rose-50 px-4 py-3 text-sm font-bold text-rose-500">{notice}</p>
+        )}
+      </Card>
+
+      {/* 기간 목표 */}
+      <Card>
+        <SectionTitle
+          emoji="🎯"
+          subtitle="기간을 정하면 하루 권장량을 자동으로 나눠 줄게요"
+          title="나의 기간 목표"
+          right={
+            <button
+              type="button"
+              onClick={() => setGoalModalOpen(true)}
+              className="rounded-full bg-rose-400 px-4 py-2 text-sm font-extrabold text-white shadow-md hover:bg-rose-500"
+            >
+              + 목표 만들기
+            </button>
+          }
+        />
+        {goals.length === 0 ? (
+          <p className="rounded-2xl bg-amber-50 p-6 text-center text-sm font-bold text-stone-400">
+            아직 목표가 없어요. &ldquo;와이수학 1권을 2주 안에 끝내기&rdquo; 같은 목표를 만들어 볼까요? 🦴
+          </p>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {goals.map((goal) => (
+              <GoalCard
+                key={goal.id}
+                goal={goal}
+                todayKey={date}
+                onRemove={() => handleRemoveGoal(goal.id)}
+                onToggleHoliday={(d) => handleToggleHoliday(goal.id, d)}
+                onToggleRestWeekday={(w) => handleToggleRestWeekday(goal.id, w)}
+              />
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* 오늘 할 일 */}
+        <Card>
+          <SectionTitle
+            emoji="📋"
+            subtitle="시간표에 넣기 전에 먼저 할 일을 적어요"
+            title="오늘 할 일"
+            right={
+              <div className="flex gap-2">
+                <PillButton onClick={handleAutoFill}>🐶 자동으로 담기</PillButton>
+                <button
+                  type="button"
+                  onClick={() => setTaskModalOpen(true)}
+                  className="rounded-full bg-rose-400 px-4 py-2 text-sm font-extrabold text-white shadow-md hover:bg-rose-500"
+                >
+                  + 직접 추가
+                </button>
+              </div>
+            }
+          />
+          {day.tasks.length === 0 ? (
+            <p className="rounded-2xl bg-amber-50 p-6 text-center text-sm font-bold text-stone-400">
+              오늘 할 일을 담아 주세요 🐾
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {day.tasks.map((task) => (
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  assigned={assignedTaskIds.has(task.id)}
+                  onToggle={() => handleToggleTask(task.id)}
+                  onChangeDone={(v) => handleChangeDoneAmount(task.id, v)}
+                  onRemove={() => handleRemoveTask(task.id)}
+                />
+              ))}
+            </ul>
+          )}
+
+          <button
+            type="button"
+            onClick={handleCloseDay}
+            className="mt-4 w-full rounded-full bg-gradient-to-r from-rose-400 to-amber-400 px-5 py-3 text-base font-extrabold text-white shadow-lg shadow-rose-200 hover:from-rose-500 hover:to-amber-500"
+          >
+            🐾 오늘 공부 끝! 결과 저장하고 포인트 받기
+          </button>
+          <p className="mt-2 text-center text-xs font-bold text-stone-400">
+            시간표는 &lsquo;가이드&rsquo;일 뿐이에요. 시간을 못 지켜도 괜찮아요 — 오늘 정한 양을 다 하는 게 더 중요해요! 🐶
+          </p>
+        </Card>
+
+        {/* 시간표 */}
+        <Card>
+          <SectionTitle
+            emoji="⏰"
+            subtitle="빈칸을 눌러서 할 일을 넣어요 (끌지 않아도 돼요!)"
+            title="오늘의 시간표"
+            right={
+              day.setupDone ? (
+                <PillButton onClick={() => setDay((prev) => ({ ...prev, setupDone: false }))}>
+                  ⚙️ 다시 설정
+                </PillButton>
+              ) : null
+            }
+          />
+
+          {!day.setupDone ? (
+            <TimetableSetup
+              slotMinutes={day.slotMinutes}
+              endHour={day.endHour}
+              onConfirm={(slotMinutes, endHour) =>
+                setDay((prev) => ({ ...prev, slotMinutes, endHour, setupDone: true, assignments: {} }))
+              }
+            />
+          ) : (
+            <div
+              ref={timetableRef}
+              className="max-h-[520px] overflow-y-auto rounded-2xl border-2 border-amber-100 bg-amber-50/40 p-2"
+            >
+              {slots.map((slot) => {
+                const taskId = day.assignments?.[slot.index];
+                const task = taskId ? tasksById[taskId] : null;
+                const category = task ? CATEGORIES.find((c) => c.key === task.category) : null;
+                const isNow =
+                  date === todayKey && currentSlotIndex(slots) === slot.index;
+                return (
+                  <button
+                    key={slot.index}
+                    data-slot={slot.index}
+                    type="button"
+                    onClick={() => setSlotPickerIndex(slot.index)}
+                    className={`mb-1.5 flex w-full items-center gap-3 rounded-2xl border-2 p-2 text-left transition hover:-translate-y-0.5 hover:shadow-md ${
+                      isNow ? 'border-rose-300 bg-rose-50' : 'border-transparent bg-white'
+                    }`}
+                  >
+                    <span className="w-14 shrink-0 text-xs font-extrabold text-stone-400">
+                      {slot.label}
+                    </span>
+                    {task ? (
+                      <span
+                        className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2"
+                        style={{ backgroundColor: `${category?.color ?? '#F9A8D4'}55` }}
+                      >
+                        <span className="text-lg">{category?.emoji ?? '🐶'}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-extrabold text-stone-700">
+                            {task.title || task.workbook}
+                          </span>
+                          <span className="block truncate text-[11px] font-bold text-stone-500">
+                            {category?.label} · {task.amount}
+                            {task.unit === 'problem' ? '문제' : 'p'}
+                          </span>
+                        </span>
+                        {task.done && <span className="text-lg">✅</span>}
+                      </span>
+                    ) : (
+                      <span className="flex-1 rounded-xl border-2 border-dashed border-amber-200 px-3 py-2 text-xs font-bold text-stone-300">
+                        + 여기를 눌러 할 일 넣기
+                      </span>
+                    )}
+                    {isNow && <span className="shrink-0 text-lg">🐕</span>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* 모달들 */}
+      {goalModalOpen && (
+        <GoalFormModal onClose={() => setGoalModalOpen(false)} onSubmit={handleAddGoal} />
+      )}
+      {taskModalOpen && (
+        <TaskFormModal onClose={() => setTaskModalOpen(false)} onSubmit={handleAddTask} />
+      )}
+      {slotPickerIndex !== null && (
+        <Modal
+          title={`${slots[slotPickerIndex]?.label} 에 뭘 할까요?`}
+          subtitle="할 일 리스트에서 하나를 골라 주세요"
+          onClose={() => setSlotPickerIndex(null)}
+        >
+          {day.tasks.length === 0 ? (
+            <p className="p-4 text-center text-sm font-bold text-stone-400">
+              먼저 &lsquo;오늘 할 일&rsquo;에 계획을 담아 주세요 🐾
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {day.tasks.map((task) => {
+                const category = CATEGORIES.find((c) => c.key === task.category);
+                return (
+                  <li key={task.id}>
+                    <button
+                      type="button"
+                      onClick={() => handleAssignSlot(slotPickerIndex, task.id)}
+                      className="flex w-full items-center gap-3 rounded-2xl border-2 border-white bg-white p-3 text-left shadow-sm hover:border-rose-200"
+                    >
+                      <span className="text-2xl">{category?.emoji}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-extrabold text-stone-700">
+                          {task.title || task.workbook}
+                        </span>
+                        <span className="block truncate text-xs font-bold text-stone-400">
+                          {category?.label} · {task.amount}
+                          {task.unit === 'problem' ? '문제' : 'p'} · 약 {task.minutes}분
+                        </span>
+                      </span>
+                      {assignedTaskIds.has(task.id) && (
+                        <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-700">
+                          이미 배정됨
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <button
+            type="button"
+            onClick={() => handleAssignSlot(slotPickerIndex, null)}
+            className="mt-3 w-full rounded-full bg-stone-100 px-4 py-2 text-sm font-bold text-stone-500 hover:bg-stone-200"
+          >
+            이 칸 비우기
+          </button>
+        </Modal>
+      )}
+      {missModal && (
+        <MissStrategyModal
+          tasks={missModal.tasks}
+          onClose={() => setMissModal(null)}
+          onSelect={handleApplyMissStrategy}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 하위 컴포넌트
+// ---------------------------------------------------------------------------
+
+function StatBox({ emoji, label, value, tone = 'rose' }) {
+  const tones = {
+    rose: 'text-rose-500',
+    sky: 'text-sky-500',
+    emerald: 'text-emerald-500',
+    violet: 'text-violet-500',
+    amber: 'text-amber-600',
+  };
+  return (
+    <div className="rounded-2xl bg-amber-50 p-3 text-center">
+      <p className="text-[11px] font-bold text-stone-400">{label}</p>
+      <p className={`text-sm font-extrabold ${tones[tone]}`}>
+        {emoji} {value}
+      </p>
+    </div>
+  );
+}
+
+function TaskRow({ task, assigned, onToggle, onChangeDone, onRemove }) {
+  const category = CATEGORIES.find((c) => c.key === task.category);
+  const unitLabel = task.unit === 'problem' ? '문제' : 'p';
+  return (
+    <li
+      className={`flex flex-wrap items-center gap-2 rounded-2xl border-2 p-3 ${
+        task.done ? 'border-emerald-200 bg-emerald-50' : 'border-amber-100 bg-white'
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-lg ${
+          task.done ? 'bg-emerald-400 text-white' : 'bg-amber-100'
+        }`}
+        aria-label={task.done ? '완료 취소' : '완료 체크'}
+      >
+        {task.done ? '✓' : category?.emoji}
+      </button>
+      <div className="min-w-0 flex-1">
+        <p className={`truncate font-extrabold ${task.done ? 'text-emerald-600 line-through' : 'text-stone-700'}`}>
+          {task.title || task.workbook}
+        </p>
+        <p className="truncate text-xs font-bold text-stone-400">
+          {category?.label} · {task.workbook} · 목표 {task.amount}
+          {unitLabel}
+          {assigned && ' · ⏰ 시간표에 있음'}
+        </p>
+      </div>
+      <label className="flex items-center gap-1 text-xs font-bold text-stone-500">
+        한 만큼
+        <input
+          type="number"
+          min="0"
+          max={task.amount}
+          value={task.doneAmount}
+          onChange={(e) => onChangeDone(e.target.value)}
+          className="w-16 rounded-xl border-2 border-amber-100 px-2 py-1 text-right font-extrabold text-stone-700"
+        />
+        {unitLabel}
+      </label>
+      <button
+        type="button"
+        onClick={onRemove}
+        className="rounded-full bg-stone-100 px-3 py-1 text-xs font-bold text-stone-400 hover:bg-rose-100 hover:text-rose-500"
+      >
+        삭제
+      </button>
+    </li>
+  );
+}
+
+function GoalCard({ goal, todayKey, onRemove, onToggleHoliday, onToggleRestWeekday }) {
+  const [open, setOpen] = useState(false);
+  const category = CATEGORIES.find((c) => c.key === goal.category);
+  const summary = summarizeGoal(goal, todayKey);
+  const unitLabel = goal.unit === 'problem' ? '문제' : 'p';
+  const upcoming = useMemo(
+    () => listStudyDates(goal.startDate, goal.endDate, [], []).slice(0, 21),
+    [goal.startDate, goal.endDate]
+  );
+  const holidaySet = new Set(goal.holidays ?? []);
+
+  return (
+    <div className="rounded-2xl border-2 border-amber-100 bg-amber-50/50 p-4">
+      <div className="flex items-start gap-3">
+        <span className="text-2xl">{category?.emoji}</span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-extrabold text-stone-700">{goal.title || goal.workbook}</p>
+          <p className="truncate text-xs font-bold text-stone-400">
+            {category?.label} · {goal.startDate} ~ {goal.endDate}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="shrink-0 rounded-full bg-white px-3 py-1 text-xs font-bold text-stone-400 hover:text-rose-500"
+        >
+          삭제
+        </button>
+      </div>
+
+      <div className="mt-3 h-3 overflow-hidden rounded-full bg-white">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-rose-300 to-amber-300"
+          style={{ width: `${Math.min(100, Math.round(summary.progressRate * 100))}%` }}
+        />
+      </div>
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs font-bold text-stone-500">
+        <span>
+          📚 {summary.done} / {summary.total}
+          {unitLabel}
+        </span>
+        <span>🗓️ 남은 공부일 {summary.remainingDays}일</span>
+        <span className="text-rose-500">
+          🐾 하루 {summary.perDay}
+          {unitLabel}씩
+        </span>
+        {goal.carryOver > 0 && <span className="text-amber-600">⏭️ 밀린 양 {goal.carryOver}{unitLabel}</span>}
+        {summary.isFinished && <span className="text-emerald-500">🎉 다 끝냈어요!</span>}
+        {summary.isOverdue && <span className="text-rose-500">⏰ 기간이 지났어요</span>}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="mt-3 w-full rounded-full bg-white px-3 py-2 text-xs font-bold text-amber-700 hover:bg-amber-100"
+      >
+        {open ? '휴일 설정 접기 ▲' : '🛌 공부 안 하는 날 정하기 ▼'}
+      </button>
+
+      {open && (
+        <div className="mt-3 space-y-3">
+          <div>
+            <p className="mb-1 text-xs font-bold text-stone-500">매주 쉬는 요일</p>
+            <div className="flex gap-1">
+              {WEEKDAYS.map((label, index) => {
+                const active = (goal.restWeekdays ?? []).includes(index);
+                return (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => onToggleRestWeekday(index)}
+                    className={`h-8 w-8 rounded-full text-xs font-extrabold ${
+                      active ? 'bg-rose-400 text-white' : 'bg-white text-stone-500 hover:bg-amber-100'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <p className="mb-1 text-xs font-bold text-stone-500">콕 집어 쉬는 날 (누르면 휴일)</p>
+            <div className="flex max-h-28 flex-wrap gap-1 overflow-y-auto">
+              {upcoming.map((d) => {
+                const active = holidaySet.has(d);
+                return (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => onToggleHoliday(d)}
+                    className={`rounded-full px-2 py-1 text-[11px] font-bold ${
+                      active ? 'bg-rose-400 text-white' : 'bg-white text-stone-500 hover:bg-amber-100'
+                    }`}
+                  >
+                    {d.slice(5)} {weekdayLabel(d)}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TimetableSetup({ slotMinutes, endHour, onConfirm }) {
+  const [minutes, setMinutes] = useState(slotMinutes || DEFAULT_SLOT_MINUTES);
+  const [hour, setHour] = useState(endHour || DEFAULT_END_HOUR);
+
+  return (
+    <div className="space-y-5 rounded-2xl bg-amber-50 p-5">
+      <div>
+        <p className="mb-2 text-sm font-extrabold text-stone-700">
+          1️⃣ 몇 분 단위로 계획할래요?
+        </p>
+        <div className="flex gap-2">
+          {SLOT_MINUTE_OPTIONS.map((option) => (
+            <PillButton key={option} active={minutes === option} onClick={() => setMinutes(option)}>
+              {option}분
+            </PillButton>
+          ))}
+        </div>
+      </div>
+      <div>
+        <p className="mb-2 text-sm font-extrabold text-stone-700">
+          2️⃣ 오늘 몇 시까지 계획을 세울래요?
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {Array.from({ length: TIMETABLE_MAX_HOUR - TIMETABLE_START_HOUR }, (_, i) => TIMETABLE_START_HOUR + 1 + i).map(
+            (option) => (
+              <PillButton
+                key={option}
+                active={hour === option}
+                onClick={() => setHour(option)}
+                className="px-3 py-1.5 text-xs"
+              >
+                {option === 24 ? '밤 12시' : `${option}시`}
+              </PillButton>
+            )
+          )}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={() => onConfirm(minutes, hour)}
+        className="w-full rounded-full bg-rose-400 px-5 py-3 font-extrabold text-white shadow-md hover:bg-rose-500"
+      >
+        🐶 시간표 만들기 (아침 7시 ~ {hour === 24 ? '밤 12시' : `${hour}시`})
+      </button>
+    </div>
+  );
+}
+
+function GoalFormModal({ onClose, onSubmit }) {
+  const today = toDateKey();
+  const [category, setCategory] = useState(CATEGORIES[0].key);
+  const [workbook, setWorkbook] = useState(DEFAULT_WORKBOOKS[CATEGORIES[0].key][0]);
+  const [customWorkbook, setCustomWorkbook] = useState('');
+  const [title, setTitle] = useState('');
+  const [unit, setUnit] = useState('page');
+  const [totalAmount, setTotalAmount] = useState(60);
+  const [startDate, setStartDate] = useState(today);
+  const [endDate, setEndDate] = useState(addDays(today, 13));
+
+  const options = DEFAULT_WORKBOOKS[category] ?? [];
+  const finalWorkbook = workbook === '__custom__' ? customWorkbook : workbook;
+  const previewDays = listStudyDates(startDate, endDate, [], []).length;
+  const perDay = previewDays > 0 ? Math.ceil(Number(totalAmount || 0) / previewDays) : 0;
+
+  return (
+    <Modal title="새 목표 만들기" subtitle="기간을 정하면 하루 권장량을 계산해 줄게요" onClose={onClose}>
+      <div className="space-y-4">
+        <Field label="어떤 공부예요?">
+          <div className="flex flex-wrap gap-2">
+            {CATEGORIES.map((c) => (
+              <PillButton
+                key={c.key}
+                active={category === c.key}
+                onClick={() => {
+                  setCategory(c.key);
+                  setWorkbook(DEFAULT_WORKBOOKS[c.key]?.[0] ?? '__custom__');
+                }}
+                className="px-3 py-1.5 text-xs"
+              >
+                {c.emoji} {c.label}
+              </PillButton>
+            ))}
+          </div>
+        </Field>
+
+        <Field label="문제집">
+          <select
+            value={workbook}
+            onChange={(e) => setWorkbook(e.target.value)}
+            className="w-full rounded-2xl border-2 border-amber-100 bg-white px-4 py-2 font-bold text-stone-700"
+          >
+            {options.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+            <option value="__custom__">✏️ 직접 입력하기</option>
+          </select>
+          {workbook === '__custom__' && (
+            <input
+              value={customWorkbook}
+              onChange={(e) => setCustomWorkbook(e.target.value)}
+              placeholder="문제집 이름을 적어 주세요"
+              className="mt-2 w-full rounded-2xl border-2 border-amber-100 px-4 py-2 font-bold text-stone-700"
+            />
+          )}
+        </Field>
+
+        <Field label="목표 이름 (비워 두면 문제집 이름으로 해요)">
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="예) 와이수학 1권 2주 안에 끝내기"
+            className="w-full rounded-2xl border-2 border-amber-100 px-4 py-2 font-bold text-stone-700"
+          />
+        </Field>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="세는 단위">
+            <div className="flex gap-2">
+              {UNITS.map((u) => (
+                <PillButton key={u.key} active={unit === u.key} onClick={() => setUnit(u.key)} className="px-3 py-1.5 text-xs">
+                  {u.emoji} {u.label}
+                </PillButton>
+              ))}
+            </div>
+          </Field>
+          <Field label={`전체 ${unit === 'problem' ? '문제 수' : '페이지 수'}`}>
+            <input
+              type="number"
+              min="1"
+              value={totalAmount}
+              onChange={(e) => setTotalAmount(e.target.value)}
+              className="w-full rounded-2xl border-2 border-amber-100 px-4 py-2 text-right font-extrabold text-stone-700"
+            />
+          </Field>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="시작일">
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="w-full rounded-2xl border-2 border-amber-100 px-4 py-2 font-bold text-stone-700"
+            />
+          </Field>
+          <Field label="끝내는 날">
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="w-full rounded-2xl border-2 border-amber-100 px-4 py-2 font-bold text-stone-700"
+            />
+          </Field>
+        </div>
+
+        <p className="rounded-2xl bg-rose-50 p-4 text-center text-sm font-extrabold text-rose-500">
+          🐾 {previewDays}일 동안 하루 {perDay}
+          {unit === 'problem' ? '문제' : '페이지'}씩 하면 끝나요!
+        </p>
+
+        <button
+          type="button"
+          disabled={!finalWorkbook || Number(totalAmount) <= 0}
+          onClick={() =>
+            onSubmit({
+              category,
+              workbook: finalWorkbook,
+              title: title || finalWorkbook,
+              unit,
+              totalAmount,
+              startDate,
+              endDate,
+            })
+          }
+          className="w-full rounded-full bg-rose-400 px-5 py-3 font-extrabold text-white shadow-md hover:bg-rose-500 disabled:bg-stone-200 disabled:text-stone-400"
+        >
+          🐶 이 목표로 시작하기
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function TaskFormModal({ onClose, onSubmit }) {
+  const [category, setCategory] = useState(CATEGORIES[0].key);
+  const [workbook, setWorkbook] = useState(DEFAULT_WORKBOOKS[CATEGORIES[0].key][0]);
+  const [title, setTitle] = useState('');
+  const [unit, setUnit] = useState('page');
+  const [amount, setAmount] = useState(5);
+  const [minutes, setMinutes] = useState(30);
+
+  const options = DEFAULT_WORKBOOKS[category] ?? [];
+
+  return (
+    <Modal title="할 일 직접 추가" subtitle="오늘만 하는 공부도 여기에 담아요" onClose={onClose}>
+      <div className="space-y-4">
+        <Field label="어떤 공부예요?">
+          <div className="flex flex-wrap gap-2">
+            {CATEGORIES.map((c) => (
+              <PillButton
+                key={c.key}
+                active={category === c.key}
+                onClick={() => {
+                  setCategory(c.key);
+                  setWorkbook(DEFAULT_WORKBOOKS[c.key]?.[0] ?? '');
+                }}
+                className="px-3 py-1.5 text-xs"
+              >
+                {c.emoji} {c.label}
+              </PillButton>
+            ))}
+          </div>
+        </Field>
+        <Field label="문제집 / 교재">
+          <select
+            value={workbook}
+            onChange={(e) => setWorkbook(e.target.value)}
+            className="w-full rounded-2xl border-2 border-amber-100 bg-white px-4 py-2 font-bold text-stone-700"
+          >
+            {options.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="할 일 이름">
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="예) 3단원 복습하기"
+            className="w-full rounded-2xl border-2 border-amber-100 px-4 py-2 font-bold text-stone-700"
+          />
+        </Field>
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="단위">
+            <select
+              value={unit}
+              onChange={(e) => setUnit(e.target.value)}
+              className="w-full rounded-2xl border-2 border-amber-100 bg-white px-3 py-2 font-bold text-stone-700"
+            >
+              {UNITS.map((u) => (
+                <option key={u.key} value={u.key}>
+                  {u.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="목표량">
+            <input
+              type="number"
+              min="1"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="w-full rounded-2xl border-2 border-amber-100 px-3 py-2 text-right font-extrabold text-stone-700"
+            />
+          </Field>
+          <Field label="예상 시간(분)">
+            <input
+              type="number"
+              min="10"
+              step="10"
+              value={minutes}
+              onChange={(e) => setMinutes(e.target.value)}
+              className="w-full rounded-2xl border-2 border-amber-100 px-3 py-2 text-right font-extrabold text-stone-700"
+            />
+          </Field>
+        </div>
+        <button
+          type="button"
+          disabled={Number(amount) <= 0}
+          onClick={() => onSubmit({ category, workbook, title: title || workbook, unit, amount, minutes })}
+          className="w-full rounded-full bg-rose-400 px-5 py-3 font-extrabold text-white shadow-md hover:bg-rose-500 disabled:bg-stone-200 disabled:text-stone-400"
+        >
+          🐾 할 일 담기
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function MissStrategyModal({ tasks, onClose, onSelect }) {
+  const totalShort = tasks.reduce(
+    (sum, t) => sum + Math.max(0, t.amount - (t.done ? t.amount : Number(t.doneAmount) || 0)),
+    0
+  );
+  return (
+    <Modal
+      title="못 끝낸 공부, 어떻게 할까요?"
+      subtitle="괜찮아요! 방법을 골라 보세요 🐶"
+      onClose={onClose}
+    >
+      <p className="mb-4 rounded-2xl bg-amber-50 p-4 text-center text-sm font-bold text-stone-600">
+        오늘 남은 양은 모두 <span className="text-rose-500">{totalShort}</span>만큼이에요.
+      </p>
+      <div className="space-y-3">
+        <button
+          type="button"
+          onClick={() => onSelect(MISS_STRATEGY.PUSH)}
+          className="w-full rounded-2xl border-2 border-amber-100 bg-white p-4 text-left hover:border-rose-200"
+        >
+          <p className="font-extrabold text-stone-700">⏭️ 내일로 미루기</p>
+          <p className="mt-1 text-xs font-bold text-stone-400">
+            못 한 만큼을 내일 하루에 그대로 얹어요. 내일이 조금 바빠지지만 계획은 그대로예요.
+          </p>
+        </button>
+        <button
+          type="button"
+          onClick={() => onSelect(MISS_STRATEGY.REDISTRIBUTE)}
+          className="w-full rounded-2xl border-2 border-amber-100 bg-white p-4 text-left hover:border-rose-200"
+        >
+          <p className="font-extrabold text-stone-700">➗ 남은 날에 골고루 다시 나누기</p>
+          <p className="mt-1 text-xs font-bold text-stone-400">
+            남은 전체 분량을 남은 공부일 수로 다시 나눠요. 하루가 조금씩만 늘어나서 부담이 적어요.
+          </p>
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-extrabold text-stone-500">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+// 서버/캐시에서 온 값이 비어 있어도 컴포넌트가 안전하게 돌아가도록 형태를 맞춰 준다.
+function normalizePlanner(raw) {
+  return {
+    goals: Array.isArray(raw?.goals) ? raw.goals : [],
+    days: raw?.days && typeof raw.days === 'object' ? raw.days : {},
+  };
+}
+
+
+function Preview(){
+  const [pts,setPts]=useState(1240);
+  useEffect(()=>{const b=document.getElementById('pointBadge');if(b)b.textContent='💰 '+pts.toLocaleString()+' P';},[pts]);
+  return <StudyPlanner userName="미리보기" onPointsAwarded={(a)=>setPts(p=>p+a)} />;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Preview/>);
+</script>
+<div class="mx-auto max-w-7xl px-4 pb-10 pt-2 text-center text-xs font-bold text-stone-400">
+  미리보기 · 구글 시트 대신 브라우저 저장소를 씁니다. 초기화하려면
+  <button onclick="localStorage.removeItem('planner-preview');location.reload()" class="rounded-full bg-white px-3 py-1 text-rose-500 shadow-sm">여기</button>
+</div>
+</body></html>

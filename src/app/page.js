@@ -8,6 +8,7 @@ import ReviewMode from '@/components/ReviewMode';
 import ProblemSolver from '@/components/ProblemSolver';
 import MockExamSolver from '@/components/MockExamSolver';
 import MonthlyPlanner from '@/components/MonthlyPlanner';
+import StudyPlanner from '@/components/StudyPlanner';
 import RewardStore from '@/components/RewardStore';
 import CharacterCollection from '@/components/CharacterCollection';
 import LevelUpModal from '@/components/LevelUpModal';
@@ -436,6 +437,45 @@ export default function Home() {
     return response;
   };
 
+  // 스터디 플래너에서 하루를 마감하고 달성률만큼 포인트를 받았을 때 호출된다.
+  // 서버 저장은 StudyPlanner 안에서 이미 끝났고, 여기서는 헤더 포인트/보상 상점/캐릭터
+  // 레벨에 쓰이는 화면 상태만 즉시 갱신한다.
+  const handlePlannerPointsAwarded = (amount, dateKey) => {
+    const earned = Math.max(0, Math.round(Number(amount) || 0));
+    if (earned <= 0) return;
+
+    setDailyStats((prev) => {
+      const key = dateKey ?? getLocalDateKey();
+      const existingKey = Object.keys(prev).find((k) => toISODate(k) === key) ?? key;
+      const previousStat = prev[existingKey] ?? {};
+      return {
+        ...prev,
+        [existingKey]: {
+          ...previousStat,
+          pointsEarned: (Number(previousStat.pointsEarned) || 0) + earned,
+        },
+      };
+    });
+
+    const pointEntry = {
+      id: `planner-${dateKey ?? getLocalDateKey()}-${Date.now()}`,
+      type: 'EARN_POINT',
+      item: '스터디 플래너 달성',
+      amount: earned,
+      date: new Date().toISOString(),
+    };
+    setPointHistory((prev) => {
+      const next = mergeEntries(pointEntry, prev);
+      writeLocalValue(POINT_HISTORY_KEY, next);
+      return next;
+    });
+    setCurrentPoints((prev) => {
+      const next = prev + earned;
+      window.localStorage.setItem(CURRENT_POINTS_KEY, String(next));
+      return next;
+    });
+  };
+
   const handleRedeemPoints = async (item, amount) => {
     const response = await redeemPoints(item, amount, userInfo?.name);
     const responseRoot = getPayloadRoot(response);
@@ -556,6 +596,12 @@ export default function Home() {
             onGrade={handleGrade}
             queueLabel={solverLabel}
             onFinish={() => setActiveTab('dashboard')}
+          />
+        )}
+        {!loading && !error && activeTab === 'studyPlanner' && (
+          <StudyPlanner
+            userName={userInfo?.name}
+            onPointsAwarded={handlePlannerPointsAwarded}
           />
         )}
         {!loading && !error && activeTab === 'planner' && (

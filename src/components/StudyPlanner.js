@@ -1,0 +1,1368 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import CharacterMascot from './CharacterMascot';
+import {
+  fetchPlanner,
+  savePlanner,
+  awardPlannerPoints,
+  readPlannerCache,
+  writePlannerCache,
+} from '@/lib/api';
+import {
+  CATEGORIES,
+  DEFAULT_WORKBOOKS,
+  UNITS,
+  SLOT_MINUTE_OPTIONS,
+  TIMETABLE_START_HOUR,
+  TIMETABLE_MAX_HOUR,
+  DEFAULT_END_HOUR,
+  DEFAULT_SLOT_MINUTES,
+  MISS_STRATEGY,
+  MAX_DAILY_PLANNER_POINTS,
+  toDateKey,
+  addDays,
+  weekdayLabel,
+  buildTimeSlots,
+  currentSlotIndex,
+  slotSpanForTask,
+  buildTasksForDate,
+  calcDayStats,
+  calcPointDelta,
+  calcPlannerPoints,
+  cheerMessage,
+  createEmptyDayPlan,
+  createTask,
+  createGoal,
+  summarizeGoal,
+  recalcAfterMiss,
+  listStudyDates,
+} from '@/lib/planner';
+
+const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+
+// ---------------------------------------------------------------------------
+// 작은 UI 조각들
+// ---------------------------------------------------------------------------
+
+function Card({ children, className = '' }) {
+  return (
+    <section
+      className={`rounded-[2rem] border-4 border-white bg-white p-4 shadow-xl shadow-amber-100/70 md:p-5 ${className}`}
+    >
+      {children}
+    </section>
+  );
+}
+
+function SectionTitle({ emoji, title, subtitle, right }) {
+  return (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <p className="text-xs font-bold text-rose-400">{subtitle}</p>
+        <h3 className="text-lg font-extrabold text-stone-700">
+          {emoji} {title}
+        </h3>
+      </div>
+      {right}
+    </div>
+  );
+}
+
+function PillButton({ active, children, className = '', ...props }) {
+  return (
+    <button
+      type="button"
+      className={`rounded-full px-4 py-2 text-sm font-bold transition ${
+        active
+          ? 'bg-rose-400 text-white shadow-md shadow-rose-200'
+          : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+      } ${className}`}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** 과목 비중 도넛 차트 (외부 라이브러리 없이 SVG로 직접 그린다) */
+function SubjectDonut({ shares, mode = 'planned', size = 148 }) {
+  const key = mode === 'done' ? 'doneShare' : 'plannedShare';
+  const visible = shares.filter((s) => s[key] > 0);
+  const total = visible.reduce((sum, s) => sum + s[key], 0);
+  const radius = size / 2 - 12;
+  const circumference = 2 * Math.PI * radius;
+
+  if (total <= 0) {
+    return (
+      <div
+        className="flex items-center justify-center rounded-full border-8 border-amber-100 text-center text-xs font-bold text-stone-400"
+        style={{ width: size, height: size }}
+      >
+        아직 기록이
+        <br />
+        없어요 🐾
+      </div>
+    );
+  }
+
+  let offset = 0;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label="과목 비중">
+      <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#FEF3C7" strokeWidth="18" />
+      {visible.map((share) => {
+        const ratio = share[key] / total;
+        const dash = ratio * circumference;
+        const el = (
+          <circle
+            key={share.subject}
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke={share.color}
+            strokeWidth="18"
+            strokeLinecap="butt"
+            strokeDasharray={`${dash} ${circumference - dash}`}
+            strokeDashoffset={-offset}
+            transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          />
+        );
+        offset += dash;
+        return el;
+      })}
+      <text
+        x="50%"
+        y="47%"
+        textAnchor="middle"
+        className="fill-stone-500"
+        style={{ fontSize: 12, fontWeight: 700 }}
+      >
+        과목 비중
+      </text>
+      <text x="50%" y="66%" textAnchor="middle" style={{ fontSize: 20 }}>
+        🐶
+      </text>
+    </svg>
+  );
+}
+
+/** 달성률 원형 게이지 */
+function AchievementRing({ rate, size = 116 }) {
+  const radius = size / 2 - 10;
+  const circumference = 2 * Math.PI * radius;
+  const dash = Math.min(1, Math.max(0, rate)) * circumference;
+  return (
+    <div className="relative" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#FFE4E6" strokeWidth="14" />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="#FB7185"
+          strokeWidth="14"
+          strokeLinecap="round"
+          strokeDasharray={`${dash} ${circumference - dash}`}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-2xl font-extrabold text-rose-500">{Math.round(rate * 100)}%</span>
+        <span className="text-[10px] font-bold text-stone-400">오늘 달성률</span>
+      </div>
+    </div>
+  );
+}
+
+function Modal({ title, subtitle, onClose, children, maxWidth = 'max-w-lg' }) {
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className={`w-full ${maxWidth} overflow-hidden rounded-[2rem] border-4 border-white bg-amber-50 shadow-2xl`}>
+        <div className="flex items-center gap-3 bg-gradient-to-r from-rose-100 to-amber-100 p-5">
+          <span className="text-3xl">🐶</span>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold text-rose-500">{subtitle}</p>
+            <h2 className="text-xl font-extrabold text-stone-700">{title}</h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full bg-white px-4 py-2 text-sm font-bold text-rose-500 shadow-sm hover:bg-rose-50"
+          >
+            닫기 ✕
+          </button>
+        </div>
+        <div className="max-h-[70vh] overflow-y-auto p-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 메인 컴포넌트
+// ---------------------------------------------------------------------------
+
+export default function StudyPlanner({ userName, onPointsAwarded }) {
+  const todayKey = toDateKey();
+  const [date, setDate] = useState(todayKey);
+  const [planner, setPlanner] = useState(() => ({ goals: [], days: {} }));
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState(null);
+
+  const [goalModalOpen, setGoalModalOpen] = useState(false);
+  const [taskModalOpen, setTaskModalOpen] = useState(false);
+  const [slotPickerIndex, setSlotPickerIndex] = useState(null);
+  const [missModal, setMissModal] = useState(null);
+  const [statsMode, setStatsMode] = useState('planned');
+
+  const timetableRef = useRef(null);
+  const saveTimerRef = useRef(null);
+  const loadedRef = useRef(false);
+
+  // ---- 로딩 -------------------------------------------------------------
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const cached = readPlannerCache(userName);
+      if (cached && alive) setPlanner(normalizePlanner(cached));
+      const { planner: remote, error } = await fetchPlanner(userName);
+      if (!alive) return;
+      if (remote) setPlanner(normalizePlanner(remote));
+      if (error && !remote) setNotice('오프라인 상태예요. 계획은 이 기기에 저장할게요 🐾');
+      setLoading(false);
+      loadedRef.current = true;
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [userName]);
+
+  // ---- 자동 저장(디바운스) -----------------------------------------------
+  const persist = useCallback(
+    (next) => {
+      writePlannerCache(userName, next);
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(async () => {
+        setSaving(true);
+        try {
+          await savePlanner(next, userName);
+        } catch {
+          setNotice('저장이 늦어지고 있어요. 계획은 안전하게 보관 중이에요 🐾');
+        } finally {
+          setSaving(false);
+        }
+      }, 800);
+    },
+    [userName]
+  );
+
+  const update = useCallback(
+    (recipe) => {
+      setPlanner((prev) => {
+        const next = recipe(prev);
+        if (loadedRef.current) persist(next);
+        return next;
+      });
+    },
+    [persist]
+  );
+
+  const day = planner.days[date] ?? createEmptyDayPlan(date);
+  const goals = planner.goals ?? [];
+
+  const setDay = useCallback(
+    (recipe) => {
+      update((prev) => {
+        const current = prev.days[date] ?? createEmptyDayPlan(date);
+        return { ...prev, days: { ...prev.days, [date]: recipe(current) } };
+      });
+    },
+    [date, update]
+  );
+
+  // ---- 파생값 -----------------------------------------------------------
+  const slots = useMemo(
+    () => buildTimeSlots(day.endHour, day.slotMinutes),
+    [day.endHour, day.slotMinutes]
+  );
+  const stats = useMemo(() => calcDayStats(day.tasks), [day.tasks]);
+  const tasksById = useMemo(
+    () => Object.fromEntries(day.tasks.map((t) => [t.id, t])),
+    [day.tasks]
+  );
+  const assignedTaskIds = useMemo(
+    () => new Set(Object.values(day.assignments ?? {})),
+    [day.assignments]
+  );
+
+  // 시간표 진입 시 현재 시각으로 스크롤
+  useEffect(() => {
+    if (!day.setupDone || slots.length === 0 || date !== todayKey) return;
+    const container = timetableRef.current;
+    if (!container) return;
+    const index = currentSlotIndex(slots);
+    const row = container.querySelector(`[data-slot="${index}"]`);
+    if (row) {
+      container.scrollTop = Math.max(0, row.offsetTop - container.clientHeight / 3);
+    }
+  }, [day.setupDone, slots, date, todayKey]);
+
+  // ---- 액션 -------------------------------------------------------------
+
+  const handleAutoFill = () => {
+    const generated = buildTasksForDate(goals, date);
+    if (generated.length === 0) {
+      setNotice('오늘 배정할 목표가 없어요. 먼저 기간 목표를 만들어 볼까요? 🦴');
+      return;
+    }
+    setDay((prev) => {
+      const existingGoalIds = new Set(prev.tasks.map((t) => t.goalId).filter(Boolean));
+      const fresh = generated.filter((t) => !existingGoalIds.has(t.goalId));
+      return { ...prev, tasks: [...prev.tasks, ...fresh] };
+    });
+    setNotice(null);
+  };
+
+  const handleAddTask = (draft) => {
+    setDay((prev) => ({ ...prev, tasks: [...prev.tasks, createTask(draft)] }));
+    setTaskModalOpen(false);
+  };
+
+  const handleRemoveTask = (taskId) => {
+    setDay((prev) => ({
+      ...prev,
+      tasks: prev.tasks.filter((t) => t.id !== taskId),
+      assignments: Object.fromEntries(
+        Object.entries(prev.assignments ?? {}).filter(([, id]) => id !== taskId)
+      ),
+    }));
+  };
+
+  const handleToggleTask = (taskId) => {
+    setDay((prev) => ({
+      ...prev,
+      tasks: prev.tasks.map((t) =>
+        t.id === taskId
+          ? { ...t, done: !t.done, doneAmount: !t.done ? t.amount : 0 }
+          : t
+      ),
+    }));
+  };
+
+  const handleChangeDoneAmount = (taskId, value) => {
+    setDay((prev) => ({
+      ...prev,
+      tasks: prev.tasks.map((t) => {
+        if (t.id !== taskId) return t;
+        const doneAmount = Math.max(0, Math.min(t.amount, Math.round(Number(value) || 0)));
+        return { ...t, doneAmount, done: doneAmount >= t.amount && t.amount > 0 };
+      }),
+    }));
+  };
+
+  const handleAssignSlot = (slotIndex, taskId) => {
+    setDay((prev) => {
+      const next = { ...(prev.assignments ?? {}) };
+      // 같은 할 일이 다른 칸에 이미 있으면 옮기는 것으로 처리한다.
+      Object.keys(next).forEach((key) => {
+        if (next[key] === taskId) delete next[key];
+      });
+      if (taskId) next[slotIndex] = taskId;
+      else delete next[slotIndex];
+      return { ...prev, assignments: next };
+    });
+    setSlotPickerIndex(null);
+  };
+
+  const handleAddGoal = (draft) => {
+    update((prev) => ({ ...prev, goals: [...prev.goals, createGoal(draft)] }));
+    setGoalModalOpen(false);
+  };
+
+  const handleRemoveGoal = (goalId) => {
+    update((prev) => ({ ...prev, goals: prev.goals.filter((g) => g.id !== goalId) }));
+  };
+
+  const handleToggleHoliday = (goalId, dateKey) => {
+    update((prev) => ({
+      ...prev,
+      goals: prev.goals.map((g) => {
+        if (g.id !== goalId) return g;
+        const holidays = new Set(g.holidays ?? []);
+        if (holidays.has(dateKey)) holidays.delete(dateKey);
+        else holidays.add(dateKey);
+        return { ...g, holidays: [...holidays].sort() };
+      }),
+    }));
+  };
+
+  const handleToggleRestWeekday = (goalId, weekday) => {
+    update((prev) => ({
+      ...prev,
+      goals: prev.goals.map((g) => {
+        if (g.id !== goalId) return g;
+        const rest = new Set(g.restWeekdays ?? []);
+        if (rest.has(weekday)) rest.delete(weekday);
+        else rest.add(weekday);
+        return { ...g, restWeekdays: [...rest].sort() };
+      }),
+    }));
+  };
+
+  // 하루 마감: 포인트 지급 + 목표 진행도 반영 + 미달성 처리 안내
+  const handleCloseDay = async () => {
+    if (day.tasks.length === 0) {
+      setNotice('오늘 할 일이 없어요. 먼저 계획을 세워 볼까요? 🐾');
+      return;
+    }
+    const delta = calcPointDelta(day.tasks, day.pointsAwarded);
+    const earned = calcPlannerPoints(day.tasks);
+
+    // 완료한 만큼 각 목표의 누적 진행도에 더한다.
+    update((prev) => {
+      const gains = {};
+      day.tasks.forEach((t) => {
+        if (!t.goalId) return;
+        const done = t.done ? t.amount : Math.max(0, Number(t.doneAmount) || 0);
+        gains[t.goalId] = (gains[t.goalId] || 0) + done;
+      });
+      const prevAwarded = prev.days[date]?.pointsAwarded ?? 0;
+      const prevGains = prev.days[date]?.appliedGains ?? {};
+      return {
+        ...prev,
+        goals: prev.goals.map((g) =>
+          gains[g.id] != null
+            ? {
+                ...g,
+                // 재마감해도 중복 누적되지 않도록 이전에 반영한 양을 뺀다.
+                completedAmount: Math.max(
+                  0,
+                  (Number(g.completedAmount) || 0) - (prevGains[g.id] || 0) + gains[g.id]
+                ),
+              }
+            : g
+        ),
+        days: {
+          ...prev.days,
+          [date]: {
+            ...(prev.days[date] ?? createEmptyDayPlan(date)),
+            closed: true,
+            pointsAwarded: Math.max(prevAwarded, earned),
+            appliedGains: gains,
+          },
+        },
+      };
+    });
+
+    if (delta > 0) {
+      try {
+        await awardPlannerPoints(date, delta, stats.achievementRate, userName);
+        onPointsAwarded?.(delta, date);
+        setNotice(`오늘 계획 ${Math.round(stats.achievementRate * 100)}% 달성! 💰 ${delta}P 받았어요 🎉`);
+      } catch {
+        onPointsAwarded?.(delta, date);
+        setNotice(`💰 ${delta}P 획득! (서버 반영은 잠시 후 다시 시도할게요 🐾)`);
+      }
+    } else {
+      setNotice('오늘 기록을 저장했어요 🐾');
+    }
+
+    // 못 끝낸 목표가 있으면 처리 방법을 묻는다.
+    const missed = day.tasks.filter(
+      (t) => t.goalId && (t.done ? t.amount : Number(t.doneAmount) || 0) < t.amount
+    );
+    if (missed.length > 0) setMissModal({ tasks: missed });
+  };
+
+  const handleApplyMissStrategy = (strategy) => {
+    update((prev) => {
+      let nextGoals = prev.goals;
+      (missModal?.tasks ?? []).forEach((task) => {
+        nextGoals = nextGoals.map((g) => {
+          if (g.id !== task.goalId) return g;
+          const done = task.done ? task.amount : Number(task.doneAmount) || 0;
+          const { goal } = recalcAfterMiss(g, date, task.amount, done, strategy);
+          return goal;
+        });
+      });
+      return { ...prev, goals: nextGoals };
+    });
+    setMissModal(null);
+    setNotice(
+      strategy === MISS_STRATEGY.PUSH
+        ? '못 한 만큼 내일로 옮겼어요. 내일 조금만 더 힘내요! 🐶'
+        : '남은 기간에 맞춰 골고루 다시 나눴어요. 부담 없이 가요 🐾'
+    );
+  };
+
+  // ---- 렌더 -------------------------------------------------------------
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center gap-4 py-20">
+        <CharacterMascot name="chick" height={64} />
+        <p className="text-lg text-amber-700">🐾 오늘의 계획을 가져오는 중...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-4">
+      {/* 상단: 날짜 + 달성률 + 통계 */}
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <CharacterMascot name="hedgehog" height={54} />
+            <div>
+              <p className="text-xs font-bold text-rose-400">🐾 오늘 내가 정한 계획, 내가 해내기</p>
+              <h2 className="text-2xl font-extrabold text-stone-700">📝 나의 스터디 플래너</h2>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setDate(addDays(date, -1))}
+              className="rounded-full bg-amber-100 px-4 py-2 font-extrabold text-amber-700 hover:bg-amber-200"
+              aria-label="어제"
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              onClick={() => setDate(todayKey)}
+              className="min-w-44 rounded-full bg-rose-400 px-5 py-2 text-sm font-extrabold text-white shadow-md"
+            >
+              {date} ({weekdayLabel(date)}) {date === todayKey ? '· 오늘' : ''}
+            </button>
+            <button
+              type="button"
+              onClick={() => setDate(addDays(date, 1))}
+              className="rounded-full bg-amber-100 px-4 py-2 font-extrabold text-amber-700 hover:bg-amber-200"
+              aria-label="내일"
+            >
+              ›
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 md:grid-cols-[auto_auto_1fr]">
+          <div className="flex items-center justify-center">
+            <AchievementRing rate={stats.achievementRate} />
+          </div>
+          <div className="flex flex-col items-center justify-center gap-2">
+            <SubjectDonut shares={stats.subjectShares} mode={statsMode} />
+            <div className="flex gap-1">
+              <PillButton
+                active={statsMode === 'planned'}
+                onClick={() => setStatsMode('planned')}
+                className="px-3 py-1 text-xs"
+              >
+                계획
+              </PillButton>
+              <PillButton
+                active={statsMode === 'done'}
+                onClick={() => setStatsMode('done')}
+                className="px-3 py-1 text-xs"
+              >
+                완료
+              </PillButton>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <StatBox emoji="📖" label="공부한 페이지" value={`${stats.donePages} / ${stats.plannedPages}p`} tone="rose" />
+            <StatBox emoji="✏️" label="푼 문제" value={`${stats.doneProblems} / ${stats.plannedProblems}문제`} tone="sky" />
+            <StatBox emoji="✅" label="끝낸 할 일" value={`${stats.doneCount} / ${stats.taskCount}개`} tone="emerald" />
+            <StatBox emoji="⏱️" label="계획한 시간" value={`${Math.round(stats.totalMinutes / 60 * 10) / 10}시간`} tone="violet" />
+            <StatBox emoji="💰" label="예상 포인트" value={`${calcPlannerPoints(day.tasks)}P / ${MAX_DAILY_PLANNER_POINTS}P`} tone="amber" />
+            <div className="col-span-2 flex items-center justify-center rounded-2xl bg-gradient-to-r from-rose-50 to-amber-50 p-3 text-center text-sm font-bold text-rose-500 sm:col-span-1">
+              {cheerMessage(stats.achievementRate)}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {stats.subjectShares.map((share) => (
+            <span
+              key={share.subject}
+              className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-stone-600"
+            >
+              <span className="h-3 w-3 rounded-full" style={{ backgroundColor: share.color }} />
+              {share.subject} {Math.round((statsMode === 'done' ? share.doneShare : share.plannedShare) * 100)}%
+            </span>
+          ))}
+          {saving && <span className="text-xs font-bold text-stone-400">저장 중... 🐾</span>}
+        </div>
+
+        {notice && (
+          <p className="mt-3 rounded-2xl bg-rose-50 px-4 py-3 text-sm font-bold text-rose-500">{notice}</p>
+        )}
+      </Card>
+
+      {/* 기간 목표 */}
+      <Card>
+        <SectionTitle
+          emoji="🎯"
+          subtitle="기간을 정하면 하루 권장량을 자동으로 나눠 줄게요"
+          title="나의 기간 목표"
+          right={
+            <button
+              type="button"
+              onClick={() => setGoalModalOpen(true)}
+              className="rounded-full bg-rose-400 px-4 py-2 text-sm font-extrabold text-white shadow-md hover:bg-rose-500"
+            >
+              + 목표 만들기
+            </button>
+          }
+        />
+        {goals.length === 0 ? (
+          <p className="rounded-2xl bg-amber-50 p-6 text-center text-sm font-bold text-stone-400">
+            아직 목표가 없어요. &ldquo;와이수학 1권을 2주 안에 끝내기&rdquo; 같은 목표를 만들어 볼까요? 🦴
+          </p>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {goals.map((goal) => (
+              <GoalCard
+                key={goal.id}
+                goal={goal}
+                todayKey={date}
+                onRemove={() => handleRemoveGoal(goal.id)}
+                onToggleHoliday={(d) => handleToggleHoliday(goal.id, d)}
+                onToggleRestWeekday={(w) => handleToggleRestWeekday(goal.id, w)}
+              />
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* 오늘 할 일 */}
+        <Card>
+          <SectionTitle
+            emoji="📋"
+            subtitle="시간표에 넣기 전에 먼저 할 일을 적어요"
+            title="오늘 할 일"
+            right={
+              <div className="flex gap-2">
+                <PillButton onClick={handleAutoFill}>🐶 자동으로 담기</PillButton>
+                <button
+                  type="button"
+                  onClick={() => setTaskModalOpen(true)}
+                  className="rounded-full bg-rose-400 px-4 py-2 text-sm font-extrabold text-white shadow-md hover:bg-rose-500"
+                >
+                  + 직접 추가
+                </button>
+              </div>
+            }
+          />
+          {day.tasks.length === 0 ? (
+            <p className="rounded-2xl bg-amber-50 p-6 text-center text-sm font-bold text-stone-400">
+              오늘 할 일을 담아 주세요 🐾
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {day.tasks.map((task) => (
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  assigned={assignedTaskIds.has(task.id)}
+                  onToggle={() => handleToggleTask(task.id)}
+                  onChangeDone={(v) => handleChangeDoneAmount(task.id, v)}
+                  onRemove={() => handleRemoveTask(task.id)}
+                />
+              ))}
+            </ul>
+          )}
+
+          <button
+            type="button"
+            onClick={handleCloseDay}
+            className="mt-4 w-full rounded-full bg-gradient-to-r from-rose-400 to-amber-400 px-5 py-3 text-base font-extrabold text-white shadow-lg shadow-rose-200 hover:from-rose-500 hover:to-amber-500"
+          >
+            🐾 오늘 공부 끝! 결과 저장하고 포인트 받기
+          </button>
+          <p className="mt-2 text-center text-xs font-bold text-stone-400">
+            시간표는 &lsquo;가이드&rsquo;일 뿐이에요. 시간을 못 지켜도 괜찮아요 — 오늘 정한 양을 다 하는 게 더 중요해요! 🐶
+          </p>
+        </Card>
+
+        {/* 시간표 */}
+        <Card>
+          <SectionTitle
+            emoji="⏰"
+            subtitle="빈칸을 눌러서 할 일을 넣어요 (끌지 않아도 돼요!)"
+            title="오늘의 시간표"
+            right={
+              day.setupDone ? (
+                <PillButton onClick={() => setDay((prev) => ({ ...prev, setupDone: false }))}>
+                  ⚙️ 다시 설정
+                </PillButton>
+              ) : null
+            }
+          />
+
+          {!day.setupDone ? (
+            <TimetableSetup
+              slotMinutes={day.slotMinutes}
+              endHour={day.endHour}
+              onConfirm={(slotMinutes, endHour) =>
+                setDay((prev) => ({ ...prev, slotMinutes, endHour, setupDone: true, assignments: {} }))
+              }
+            />
+          ) : (
+            <div
+              ref={timetableRef}
+              className="max-h-[520px] overflow-y-auto rounded-2xl border-2 border-amber-100 bg-amber-50/40 p-2"
+            >
+              {slots.map((slot) => {
+                const taskId = day.assignments?.[slot.index];
+                const task = taskId ? tasksById[taskId] : null;
+                const category = task ? CATEGORIES.find((c) => c.key === task.category) : null;
+                const isNow =
+                  date === todayKey && currentSlotIndex(slots) === slot.index;
+                return (
+                  <button
+                    key={slot.index}
+                    data-slot={slot.index}
+                    type="button"
+                    onClick={() => setSlotPickerIndex(slot.index)}
+                    className={`mb-1.5 flex w-full items-center gap-3 rounded-2xl border-2 p-2 text-left transition hover:-translate-y-0.5 hover:shadow-md ${
+                      isNow ? 'border-rose-300 bg-rose-50' : 'border-transparent bg-white'
+                    }`}
+                  >
+                    <span className="w-14 shrink-0 text-xs font-extrabold text-stone-400">
+                      {slot.label}
+                    </span>
+                    {task ? (
+                      <span
+                        className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2"
+                        style={{ backgroundColor: `${category?.color ?? '#F9A8D4'}55` }}
+                      >
+                        <span className="text-lg">{category?.emoji ?? '🐶'}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-extrabold text-stone-700">
+                            {task.title || task.workbook}
+                          </span>
+                          <span className="block truncate text-[11px] font-bold text-stone-500">
+                            {category?.label} · {task.amount}
+                            {task.unit === 'problem' ? '문제' : 'p'}
+                          </span>
+                        </span>
+                        {task.done && <span className="text-lg">✅</span>}
+                      </span>
+                    ) : (
+                      <span className="flex-1 rounded-xl border-2 border-dashed border-amber-200 px-3 py-2 text-xs font-bold text-stone-300">
+                        + 여기를 눌러 할 일 넣기
+                      </span>
+                    )}
+                    {isNow && <span className="shrink-0 text-lg">🐕</span>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* 모달들 */}
+      {goalModalOpen && (
+        <GoalFormModal onClose={() => setGoalModalOpen(false)} onSubmit={handleAddGoal} />
+      )}
+      {taskModalOpen && (
+        <TaskFormModal onClose={() => setTaskModalOpen(false)} onSubmit={handleAddTask} />
+      )}
+      {slotPickerIndex !== null && (
+        <Modal
+          title={`${slots[slotPickerIndex]?.label} 에 뭘 할까요?`}
+          subtitle="할 일 리스트에서 하나를 골라 주세요"
+          onClose={() => setSlotPickerIndex(null)}
+        >
+          {day.tasks.length === 0 ? (
+            <p className="p-4 text-center text-sm font-bold text-stone-400">
+              먼저 &lsquo;오늘 할 일&rsquo;에 계획을 담아 주세요 🐾
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {day.tasks.map((task) => {
+                const category = CATEGORIES.find((c) => c.key === task.category);
+                return (
+                  <li key={task.id}>
+                    <button
+                      type="button"
+                      onClick={() => handleAssignSlot(slotPickerIndex, task.id)}
+                      className="flex w-full items-center gap-3 rounded-2xl border-2 border-white bg-white p-3 text-left shadow-sm hover:border-rose-200"
+                    >
+                      <span className="text-2xl">{category?.emoji}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-extrabold text-stone-700">
+                          {task.title || task.workbook}
+                        </span>
+                        <span className="block truncate text-xs font-bold text-stone-400">
+                          {category?.label} · {task.amount}
+                          {task.unit === 'problem' ? '문제' : 'p'} · 약 {task.minutes}분
+                        </span>
+                      </span>
+                      {assignedTaskIds.has(task.id) && (
+                        <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-700">
+                          이미 배정됨
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <button
+            type="button"
+            onClick={() => handleAssignSlot(slotPickerIndex, null)}
+            className="mt-3 w-full rounded-full bg-stone-100 px-4 py-2 text-sm font-bold text-stone-500 hover:bg-stone-200"
+          >
+            이 칸 비우기
+          </button>
+        </Modal>
+      )}
+      {missModal && (
+        <MissStrategyModal
+          tasks={missModal.tasks}
+          onClose={() => setMissModal(null)}
+          onSelect={handleApplyMissStrategy}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 하위 컴포넌트
+// ---------------------------------------------------------------------------
+
+function StatBox({ emoji, label, value, tone = 'rose' }) {
+  const tones = {
+    rose: 'text-rose-500',
+    sky: 'text-sky-500',
+    emerald: 'text-emerald-500',
+    violet: 'text-violet-500',
+    amber: 'text-amber-600',
+  };
+  return (
+    <div className="rounded-2xl bg-amber-50 p-3 text-center">
+      <p className="text-[11px] font-bold text-stone-400">{label}</p>
+      <p className={`text-sm font-extrabold ${tones[tone]}`}>
+        {emoji} {value}
+      </p>
+    </div>
+  );
+}
+
+function TaskRow({ task, assigned, onToggle, onChangeDone, onRemove }) {
+  const category = CATEGORIES.find((c) => c.key === task.category);
+  const unitLabel = task.unit === 'problem' ? '문제' : 'p';
+  return (
+    <li
+      className={`flex flex-wrap items-center gap-2 rounded-2xl border-2 p-3 ${
+        task.done ? 'border-emerald-200 bg-emerald-50' : 'border-amber-100 bg-white'
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-lg ${
+          task.done ? 'bg-emerald-400 text-white' : 'bg-amber-100'
+        }`}
+        aria-label={task.done ? '완료 취소' : '완료 체크'}
+      >
+        {task.done ? '✓' : category?.emoji}
+      </button>
+      <div className="min-w-0 flex-1">
+        <p className={`truncate font-extrabold ${task.done ? 'text-emerald-600 line-through' : 'text-stone-700'}`}>
+          {task.title || task.workbook}
+        </p>
+        <p className="truncate text-xs font-bold text-stone-400">
+          {category?.label} · {task.workbook} · 목표 {task.amount}
+          {unitLabel}
+          {assigned && ' · ⏰ 시간표에 있음'}
+        </p>
+      </div>
+      <label className="flex items-center gap-1 text-xs font-bold text-stone-500">
+        한 만큼
+        <input
+          type="number"
+          min="0"
+          max={task.amount}
+          value={task.doneAmount}
+          onChange={(e) => onChangeDone(e.target.value)}
+          className="w-16 rounded-xl border-2 border-amber-100 px-2 py-1 text-right font-extrabold text-stone-700"
+        />
+        {unitLabel}
+      </label>
+      <button
+        type="button"
+        onClick={onRemove}
+        className="rounded-full bg-stone-100 px-3 py-1 text-xs font-bold text-stone-400 hover:bg-rose-100 hover:text-rose-500"
+      >
+        삭제
+      </button>
+    </li>
+  );
+}
+
+function GoalCard({ goal, todayKey, onRemove, onToggleHoliday, onToggleRestWeekday }) {
+  const [open, setOpen] = useState(false);
+  const category = CATEGORIES.find((c) => c.key === goal.category);
+  const summary = summarizeGoal(goal, todayKey);
+  const unitLabel = goal.unit === 'problem' ? '문제' : 'p';
+  const upcoming = useMemo(
+    () => listStudyDates(goal.startDate, goal.endDate, [], []).slice(0, 21),
+    [goal.startDate, goal.endDate]
+  );
+  const holidaySet = new Set(goal.holidays ?? []);
+
+  return (
+    <div className="rounded-2xl border-2 border-amber-100 bg-amber-50/50 p-4">
+      <div className="flex items-start gap-3">
+        <span className="text-2xl">{category?.emoji}</span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-extrabold text-stone-700">{goal.title || goal.workbook}</p>
+          <p className="truncate text-xs font-bold text-stone-400">
+            {category?.label} · {goal.startDate} ~ {goal.endDate}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="shrink-0 rounded-full bg-white px-3 py-1 text-xs font-bold text-stone-400 hover:text-rose-500"
+        >
+          삭제
+        </button>
+      </div>
+
+      <div className="mt-3 h-3 overflow-hidden rounded-full bg-white">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-rose-300 to-amber-300"
+          style={{ width: `${Math.min(100, Math.round(summary.progressRate * 100))}%` }}
+        />
+      </div>
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs font-bold text-stone-500">
+        <span>
+          📚 {summary.done} / {summary.total}
+          {unitLabel}
+        </span>
+        <span>🗓️ 남은 공부일 {summary.remainingDays}일</span>
+        <span className="text-rose-500">
+          🐾 하루 {summary.perDay}
+          {unitLabel}씩
+        </span>
+        {goal.carryOver > 0 && <span className="text-amber-600">⏭️ 밀린 양 {goal.carryOver}{unitLabel}</span>}
+        {summary.isFinished && <span className="text-emerald-500">🎉 다 끝냈어요!</span>}
+        {summary.isOverdue && <span className="text-rose-500">⏰ 기간이 지났어요</span>}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="mt-3 w-full rounded-full bg-white px-3 py-2 text-xs font-bold text-amber-700 hover:bg-amber-100"
+      >
+        {open ? '휴일 설정 접기 ▲' : '🛌 공부 안 하는 날 정하기 ▼'}
+      </button>
+
+      {open && (
+        <div className="mt-3 space-y-3">
+          <div>
+            <p className="mb-1 text-xs font-bold text-stone-500">매주 쉬는 요일</p>
+            <div className="flex gap-1">
+              {WEEKDAYS.map((label, index) => {
+                const active = (goal.restWeekdays ?? []).includes(index);
+                return (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => onToggleRestWeekday(index)}
+                    className={`h-8 w-8 rounded-full text-xs font-extrabold ${
+                      active ? 'bg-rose-400 text-white' : 'bg-white text-stone-500 hover:bg-amber-100'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <p className="mb-1 text-xs font-bold text-stone-500">콕 집어 쉬는 날 (누르면 휴일)</p>
+            <div className="flex max-h-28 flex-wrap gap-1 overflow-y-auto">
+              {upcoming.map((d) => {
+                const active = holidaySet.has(d);
+                return (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => onToggleHoliday(d)}
+                    className={`rounded-full px-2 py-1 text-[11px] font-bold ${
+                      active ? 'bg-rose-400 text-white' : 'bg-white text-stone-500 hover:bg-amber-100'
+                    }`}
+                  >
+                    {d.slice(5)} {weekdayLabel(d)}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TimetableSetup({ slotMinutes, endHour, onConfirm }) {
+  const [minutes, setMinutes] = useState(slotMinutes || DEFAULT_SLOT_MINUTES);
+  const [hour, setHour] = useState(endHour || DEFAULT_END_HOUR);
+
+  return (
+    <div className="space-y-5 rounded-2xl bg-amber-50 p-5">
+      <div>
+        <p className="mb-2 text-sm font-extrabold text-stone-700">
+          1️⃣ 몇 분 단위로 계획할래요?
+        </p>
+        <div className="flex gap-2">
+          {SLOT_MINUTE_OPTIONS.map((option) => (
+            <PillButton key={option} active={minutes === option} onClick={() => setMinutes(option)}>
+              {option}분
+            </PillButton>
+          ))}
+        </div>
+      </div>
+      <div>
+        <p className="mb-2 text-sm font-extrabold text-stone-700">
+          2️⃣ 오늘 몇 시까지 계획을 세울래요?
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {Array.from({ length: TIMETABLE_MAX_HOUR - TIMETABLE_START_HOUR }, (_, i) => TIMETABLE_START_HOUR + 1 + i).map(
+            (option) => (
+              <PillButton
+                key={option}
+                active={hour === option}
+                onClick={() => setHour(option)}
+                className="px-3 py-1.5 text-xs"
+              >
+                {option === 24 ? '밤 12시' : `${option}시`}
+              </PillButton>
+            )
+          )}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={() => onConfirm(minutes, hour)}
+        className="w-full rounded-full bg-rose-400 px-5 py-3 font-extrabold text-white shadow-md hover:bg-rose-500"
+      >
+        🐶 시간표 만들기 (아침 7시 ~ {hour === 24 ? '밤 12시' : `${hour}시`})
+      </button>
+    </div>
+  );
+}
+
+function GoalFormModal({ onClose, onSubmit }) {
+  const today = toDateKey();
+  const [category, setCategory] = useState(CATEGORIES[0].key);
+  const [workbook, setWorkbook] = useState(DEFAULT_WORKBOOKS[CATEGORIES[0].key][0]);
+  const [customWorkbook, setCustomWorkbook] = useState('');
+  const [title, setTitle] = useState('');
+  const [unit, setUnit] = useState('page');
+  const [totalAmount, setTotalAmount] = useState(60);
+  const [startDate, setStartDate] = useState(today);
+  const [endDate, setEndDate] = useState(addDays(today, 13));
+
+  const options = DEFAULT_WORKBOOKS[category] ?? [];
+  const finalWorkbook = workbook === '__custom__' ? customWorkbook : workbook;
+  const previewDays = listStudyDates(startDate, endDate, [], []).length;
+  const perDay = previewDays > 0 ? Math.ceil(Number(totalAmount || 0) / previewDays) : 0;
+
+  return (
+    <Modal title="새 목표 만들기" subtitle="기간을 정하면 하루 권장량을 계산해 줄게요" onClose={onClose}>
+      <div className="space-y-4">
+        <Field label="어떤 공부예요?">
+          <div className="flex flex-wrap gap-2">
+            {CATEGORIES.map((c) => (
+              <PillButton
+                key={c.key}
+                active={category === c.key}
+                onClick={() => {
+                  setCategory(c.key);
+                  setWorkbook(DEFAULT_WORKBOOKS[c.key]?.[0] ?? '__custom__');
+                }}
+                className="px-3 py-1.5 text-xs"
+              >
+                {c.emoji} {c.label}
+              </PillButton>
+            ))}
+          </div>
+        </Field>
+
+        <Field label="문제집">
+          <select
+            value={workbook}
+            onChange={(e) => setWorkbook(e.target.value)}
+            className="w-full rounded-2xl border-2 border-amber-100 bg-white px-4 py-2 font-bold text-stone-700"
+          >
+            {options.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+            <option value="__custom__">✏️ 직접 입력하기</option>
+          </select>
+          {workbook === '__custom__' && (
+            <input
+              value={customWorkbook}
+              onChange={(e) => setCustomWorkbook(e.target.value)}
+              placeholder="문제집 이름을 적어 주세요"
+              className="mt-2 w-full rounded-2xl border-2 border-amber-100 px-4 py-2 font-bold text-stone-700"
+            />
+          )}
+        </Field>
+
+        <Field label="목표 이름 (비워 두면 문제집 이름으로 해요)">
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="예) 와이수학 1권 2주 안에 끝내기"
+            className="w-full rounded-2xl border-2 border-amber-100 px-4 py-2 font-bold text-stone-700"
+          />
+        </Field>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="세는 단위">
+            <div className="flex gap-2">
+              {UNITS.map((u) => (
+                <PillButton key={u.key} active={unit === u.key} onClick={() => setUnit(u.key)} className="px-3 py-1.5 text-xs">
+                  {u.emoji} {u.label}
+                </PillButton>
+              ))}
+            </div>
+          </Field>
+          <Field label={`전체 ${unit === 'problem' ? '문제 수' : '페이지 수'}`}>
+            <input
+              type="number"
+              min="1"
+              value={totalAmount}
+              onChange={(e) => setTotalAmount(e.target.value)}
+              className="w-full rounded-2xl border-2 border-amber-100 px-4 py-2 text-right font-extrabold text-stone-700"
+            />
+          </Field>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="시작일">
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="w-full rounded-2xl border-2 border-amber-100 px-4 py-2 font-bold text-stone-700"
+            />
+          </Field>
+          <Field label="끝내는 날">
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="w-full rounded-2xl border-2 border-amber-100 px-4 py-2 font-bold text-stone-700"
+            />
+          </Field>
+        </div>
+
+        <p className="rounded-2xl bg-rose-50 p-4 text-center text-sm font-extrabold text-rose-500">
+          🐾 {previewDays}일 동안 하루 {perDay}
+          {unit === 'problem' ? '문제' : '페이지'}씩 하면 끝나요!
+        </p>
+
+        <button
+          type="button"
+          disabled={!finalWorkbook || Number(totalAmount) <= 0}
+          onClick={() =>
+            onSubmit({
+              category,
+              workbook: finalWorkbook,
+              title: title || finalWorkbook,
+              unit,
+              totalAmount,
+              startDate,
+              endDate,
+            })
+          }
+          className="w-full rounded-full bg-rose-400 px-5 py-3 font-extrabold text-white shadow-md hover:bg-rose-500 disabled:bg-stone-200 disabled:text-stone-400"
+        >
+          🐶 이 목표로 시작하기
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function TaskFormModal({ onClose, onSubmit }) {
+  const [category, setCategory] = useState(CATEGORIES[0].key);
+  const [workbook, setWorkbook] = useState(DEFAULT_WORKBOOKS[CATEGORIES[0].key][0]);
+  const [title, setTitle] = useState('');
+  const [unit, setUnit] = useState('page');
+  const [amount, setAmount] = useState(5);
+  const [minutes, setMinutes] = useState(30);
+
+  const options = DEFAULT_WORKBOOKS[category] ?? [];
+
+  return (
+    <Modal title="할 일 직접 추가" subtitle="오늘만 하는 공부도 여기에 담아요" onClose={onClose}>
+      <div className="space-y-4">
+        <Field label="어떤 공부예요?">
+          <div className="flex flex-wrap gap-2">
+            {CATEGORIES.map((c) => (
+              <PillButton
+                key={c.key}
+                active={category === c.key}
+                onClick={() => {
+                  setCategory(c.key);
+                  setWorkbook(DEFAULT_WORKBOOKS[c.key]?.[0] ?? '');
+                }}
+                className="px-3 py-1.5 text-xs"
+              >
+                {c.emoji} {c.label}
+              </PillButton>
+            ))}
+          </div>
+        </Field>
+        <Field label="문제집 / 교재">
+          <select
+            value={workbook}
+            onChange={(e) => setWorkbook(e.target.value)}
+            className="w-full rounded-2xl border-2 border-amber-100 bg-white px-4 py-2 font-bold text-stone-700"
+          >
+            {options.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="할 일 이름">
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="예) 3단원 복습하기"
+            className="w-full rounded-2xl border-2 border-amber-100 px-4 py-2 font-bold text-stone-700"
+          />
+        </Field>
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="단위">
+            <select
+              value={unit}
+              onChange={(e) => setUnit(e.target.value)}
+              className="w-full rounded-2xl border-2 border-amber-100 bg-white px-3 py-2 font-bold text-stone-700"
+            >
+              {UNITS.map((u) => (
+                <option key={u.key} value={u.key}>
+                  {u.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="목표량">
+            <input
+              type="number"
+              min="1"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="w-full rounded-2xl border-2 border-amber-100 px-3 py-2 text-right font-extrabold text-stone-700"
+            />
+          </Field>
+          <Field label="예상 시간(분)">
+            <input
+              type="number"
+              min="10"
+              step="10"
+              value={minutes}
+              onChange={(e) => setMinutes(e.target.value)}
+              className="w-full rounded-2xl border-2 border-amber-100 px-3 py-2 text-right font-extrabold text-stone-700"
+            />
+          </Field>
+        </div>
+        <button
+          type="button"
+          disabled={Number(amount) <= 0}
+          onClick={() => onSubmit({ category, workbook, title: title || workbook, unit, amount, minutes })}
+          className="w-full rounded-full bg-rose-400 px-5 py-3 font-extrabold text-white shadow-md hover:bg-rose-500 disabled:bg-stone-200 disabled:text-stone-400"
+        >
+          🐾 할 일 담기
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function MissStrategyModal({ tasks, onClose, onSelect }) {
+  const totalShort = tasks.reduce(
+    (sum, t) => sum + Math.max(0, t.amount - (t.done ? t.amount : Number(t.doneAmount) || 0)),
+    0
+  );
+  return (
+    <Modal
+      title="못 끝낸 공부, 어떻게 할까요?"
+      subtitle="괜찮아요! 방법을 골라 보세요 🐶"
+      onClose={onClose}
+    >
+      <p className="mb-4 rounded-2xl bg-amber-50 p-4 text-center text-sm font-bold text-stone-600">
+        오늘 남은 양은 모두 <span className="text-rose-500">{totalShort}</span>만큼이에요.
+      </p>
+      <div className="space-y-3">
+        <button
+          type="button"
+          onClick={() => onSelect(MISS_STRATEGY.PUSH)}
+          className="w-full rounded-2xl border-2 border-amber-100 bg-white p-4 text-left hover:border-rose-200"
+        >
+          <p className="font-extrabold text-stone-700">⏭️ 내일로 미루기</p>
+          <p className="mt-1 text-xs font-bold text-stone-400">
+            못 한 만큼을 내일 하루에 그대로 얹어요. 내일이 조금 바빠지지만 계획은 그대로예요.
+          </p>
+        </button>
+        <button
+          type="button"
+          onClick={() => onSelect(MISS_STRATEGY.REDISTRIBUTE)}
+          className="w-full rounded-2xl border-2 border-amber-100 bg-white p-4 text-left hover:border-rose-200"
+        >
+          <p className="font-extrabold text-stone-700">➗ 남은 날에 골고루 다시 나누기</p>
+          <p className="mt-1 text-xs font-bold text-stone-400">
+            남은 전체 분량을 남은 공부일 수로 다시 나눠요. 하루가 조금씩만 늘어나서 부담이 적어요.
+          </p>
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-extrabold text-stone-500">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+// 서버/캐시에서 온 값이 비어 있어도 컴포넌트가 안전하게 돌아가도록 형태를 맞춰 준다.
+function normalizePlanner(raw) {
+  return {
+    goals: Array.isArray(raw?.goals) ? raw.goals : [],
+    days: raw?.days && typeof raw.days === 'object' ? raw.days : {},
+  };
+}
