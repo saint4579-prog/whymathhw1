@@ -41,10 +41,48 @@ body {
   transform-origin: 50% 85%;
 }
 
+/* 스터디 플래너: 할 일을 체크한 순간 '해냈다!'는 느낌을 주는 짧은 반응 */
+@keyframes task-pop {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.06);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes check-stamp {
+  0% {
+    transform: scale(0.4) rotate(-18deg);
+    opacity: 0;
+  }
+  55% {
+    transform: scale(1.18) rotate(6deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) rotate(0);
+    opacity: 1;
+  }
+}
+
+.animate-task-pop {
+  animation: task-pop 380ms ease-out;
+}
+
+.animate-check-stamp {
+  animation: check-stamp 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
 /* 멀미를 유발하지 않도록, 사용자가 움직임 최소화를 켜면 마스코트도 멈춘다. */
 @media (prefers-reduced-motion: reduce) {
   .animate-mascot-bob,
-  .animate-mascot-wiggle {
+  .animate-mascot-wiggle,
+  .animate-task-pop,
+  .animate-check-stamp {
     animation: none;
   }
 }

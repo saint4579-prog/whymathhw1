@@ -222,16 +222,30 @@ export default function StudyPlanner({ userName, onPointsAwarded }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState(null);
+  // 구글 시트 저장이 실패한 이유. null이면 정상.
+  const [saveError, setSaveError] = useState(null);
 
   const [goalModalOpen, setGoalModalOpen] = useState(false);
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [slotPickerIndex, setSlotPickerIndex] = useState(null);
   const [missModal, setMissModal] = useState(null);
   const [statsMode, setStatsMode] = useState('planned');
+  // 방금 체크한 할 일 id. 체크한 카드에만 짧게 축하 애니메이션을 준다.
+  const [justCheckedId, setJustCheckedId] = useState(null);
 
   const timetableRef = useRef(null);
   const saveTimerRef = useRef(null);
+  const celebrateTimerRef = useRef(null);
   const loadedRef = useRef(false);
+
+  // 화면을 떠날 때 남은 타이머를 정리한다.
+  useEffect(
+    () => () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (celebrateTimerRef.current) clearTimeout(celebrateTimerRef.current);
+    },
+    []
+  );
 
   // ---- 로딩 -------------------------------------------------------------
   useEffect(() => {
@@ -260,8 +274,10 @@ export default function StudyPlanner({ userName, onPointsAwarded }) {
         setSaving(true);
         try {
           await savePlanner(next, userName);
-        } catch {
-          setNotice('저장이 늦어지고 있어요. 계획은 안전하게 보관 중이에요 🐾');
+          setSaveError(null);
+        } catch (error) {
+          // 원인을 숨기면 고칠 수가 없다. 실제 메시지를 그대로 보여 준다.
+          setSaveError(String(error?.message || error));
         } finally {
           setSaving(false);
         }
@@ -352,26 +368,62 @@ export default function StudyPlanner({ userName, onPointsAwarded }) {
     }));
   };
 
+  // 할 일 하나를 끝낼 때마다 바로 체크한다.
+  // 체크한 순간 통계·진행바·예상 포인트가 즉시 갱신되고, 짧은 반응 애니메이션이 나간다.
+  // (실제 포인트 지급은 하루를 마감할 때 한 번에 이뤄진다.)
   const handleToggleTask = (taskId) => {
-    setDay((prev) => ({
-      ...prev,
-      tasks: prev.tasks.map((t) =>
-        t.id === taskId
-          ? { ...t, done: !t.done, doneAmount: !t.done ? t.amount : 0 }
-          : t
-      ),
-    }));
+    let becameDone = false;
+    let allDone = false;
+
+    setDay((prev) => {
+      const tasks = prev.tasks.map((t) => {
+        if (t.id !== taskId) return t;
+        becameDone = !t.done;
+        return { ...t, done: becameDone, doneAmount: becameDone ? t.amount : 0 };
+      });
+      allDone = tasks.length > 0 && tasks.every((t) => t.done);
+      return { ...prev, tasks };
+    });
+
+    if (becameDone) {
+      celebrate(taskId);
+      setNotice(
+        allDone
+          ? '오늘 계획을 전부 해냈어요! 아래 버튼으로 마감하고 포인트를 받아요 🐶🎉'
+          : '하나 끝! 잘하고 있어요 🐾'
+      );
+    } else {
+      setNotice(null);
+    }
   };
 
-  const handleChangeDoneAmount = (taskId, value) => {
+  // −/+ 버튼: 조금씩 한 날을 위해 1씩 올리고 내린다. 목표량에 닿으면 자동으로 완료 처리.
+  const handleStepTask = (taskId, delta) => {
+    let becameDone = false;
+
     setDay((prev) => ({
       ...prev,
       tasks: prev.tasks.map((t) => {
         if (t.id !== taskId) return t;
-        const doneAmount = Math.max(0, Math.min(t.amount, Math.round(Number(value) || 0)));
-        return { ...t, doneAmount, done: doneAmount >= t.amount && t.amount > 0 };
+        const current = t.done ? t.amount : Math.max(0, Number(t.doneAmount) || 0);
+        const doneAmount = Math.max(0, Math.min(t.amount, current + delta));
+        const done = t.amount > 0 && doneAmount >= t.amount;
+        becameDone = done && !t.done;
+        return { ...t, doneAmount, done };
       }),
     }));
+
+    if (becameDone) {
+      celebrate(taskId);
+      setNotice('하나 끝! 잘하고 있어요 🐾');
+    }
+  };
+
+  // 방금 체크한 카드에만 잠깐 애니메이션 클래스를 붙였다 뗀다.
+  const celebrate = (taskId) => {
+    if (celebrateTimerRef.current) clearTimeout(celebrateTimerRef.current);
+    setJustCheckedId(taskId);
+    celebrateTimerRef.current = setTimeout(() => setJustCheckedId(null), 450);
   };
 
   const handleAssignSlot = (slotIndex, taskId) => {
@@ -605,10 +657,27 @@ export default function StudyPlanner({ userName, onPointsAwarded }) {
             </span>
           ))}
           {saving && <span className="text-xs font-bold text-stone-400">저장 중... 🐾</span>}
+          {!saving && !saveError && (
+            <span className="text-xs font-bold text-emerald-500">구글 시트에 저장됨 ✓</span>
+          )}
         </div>
 
         {notice && (
           <p className="mt-3 rounded-2xl bg-rose-50 px-4 py-3 text-sm font-bold text-rose-500">{notice}</p>
+        )}
+
+        {saveError && (
+          <div className="mt-3 rounded-2xl border-2 border-amber-200 bg-amber-50 px-4 py-3">
+            <p className="text-sm font-extrabold text-amber-700">
+              ⚠️ 구글 시트에 저장하지 못했어요. (계획은 이 브라우저에 보관 중이라 사라지지 않아요)
+            </p>
+            <p className="mt-1 break-all text-xs font-bold text-stone-500">사유: {saveError}</p>
+            <p className="mt-1 text-xs font-bold text-stone-400">
+              {saveError.includes('콘텐츠 코드')
+                ? '이 메시지는 예전 버전의 앱스 스크립트가 응답했다는 뜻이에요. 앱스 스크립트에서 [배포 → 배포 관리 → 수정 → 버전: 새 버전]으로 다시 배포해 주세요.'
+                : '앱스 스크립트를 고친 뒤 ‘새 배포’를 만들었는지, .env.local의 주소가 그 새 배포 주소인지 확인해 주세요.'}
+            </p>
+          </div>
         )}
       </Card>
 
@@ -668,6 +737,11 @@ export default function StudyPlanner({ userName, onPointsAwarded }) {
               </div>
             }
           />
+          {day.tasks.length > 0 && (
+            <p className="mb-2 rounded-2xl bg-amber-50 px-4 py-2 text-center text-xs font-bold text-stone-500">
+              🐾 하나 끝낼 때마다 카드를 눌러 바로 체크하세요. 조금만 했으면 −/+ 로 표시해요.
+            </p>
+          )}
           {day.tasks.length === 0 ? (
             <p className="rounded-2xl bg-amber-50 p-6 text-center text-sm font-bold text-stone-400">
               오늘 할 일을 담아 주세요 🐾
@@ -679,8 +753,9 @@ export default function StudyPlanner({ userName, onPointsAwarded }) {
                   key={task.id}
                   task={task}
                   assigned={assignedTaskIds.has(task.id)}
+                  justChecked={justCheckedId === task.id}
                   onToggle={() => handleToggleTask(task.id)}
-                  onChangeDone={(v) => handleChangeDoneAmount(task.id, v)}
+                  onStep={(delta) => handleStepTask(task.id, delta)}
                   onRemove={() => handleRemoveTask(task.id)}
                 />
               ))}
@@ -692,7 +767,7 @@ export default function StudyPlanner({ userName, onPointsAwarded }) {
             onClick={handleCloseDay}
             className="mt-4 w-full rounded-full bg-gradient-to-r from-rose-400 to-amber-400 px-5 py-3 text-base font-extrabold text-white shadow-lg shadow-rose-200 hover:from-rose-500 hover:to-amber-500"
           >
-            🐾 오늘 공부 끝! 결과 저장하고 포인트 받기
+            🐾 오늘 공부 끝! 지금 마감하면 💰 {calcPointDelta(day.tasks, day.pointsAwarded)}P
           </button>
           <p className="mt-2 text-center text-xs font-bold text-stone-400">
             시간표는 &lsquo;가이드&rsquo;일 뿐이에요. 시간을 못 지켜도 괜찮아요 — 오늘 정한 양을 다 하는 게 더 중요해요! 🐶
@@ -868,54 +943,112 @@ function StatBox({ emoji, label, value, tone = 'rose' }) {
   );
 }
 
-function TaskRow({ task, assigned, onToggle, onChangeDone, onRemove }) {
+/**
+ * 할 일 한 줄.
+ * 아이가 하나 끝낼 때마다 바로 체크할 수 있도록, 카드 어디를 눌러도 완료/취소가 된다.
+ * 숫자 입력 대신 −/+ 버튼으로 "한 만큼"을 조금씩 올린다. (키보드 없이 손가락만으로 조작)
+ *
+ * 주의: 바깥이 클릭 영역이라 안쪽 조작부는 button이 아닌 div(role="button")로 감싸고,
+ * −/+와 삭제는 stopPropagation으로 카드 토글이 같이 일어나지 않게 막는다.
+ */
+function TaskRow({ task, assigned, justChecked, onToggle, onStep, onRemove }) {
   const category = CATEGORIES.find((c) => c.key === task.category);
   const unitLabel = task.unit === 'problem' ? '문제' : 'p';
+  const doneAmount = task.done ? task.amount : Math.max(0, Number(task.doneAmount) || 0);
+  const rate = task.amount > 0 ? Math.min(1, doneAmount / task.amount) : 0;
+  const started = !task.done && doneAmount > 0;
+
   return (
-    <li
-      className={`flex flex-wrap items-center gap-2 rounded-2xl border-2 p-3 ${
-        task.done ? 'border-emerald-200 bg-emerald-50' : 'border-amber-100 bg-white'
-      }`}
-    >
-      <button
-        type="button"
+    <li>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-pressed={task.done}
         onClick={onToggle}
-        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-lg ${
-          task.done ? 'bg-emerald-400 text-white' : 'bg-amber-100'
-        }`}
-        aria-label={task.done ? '완료 취소' : '완료 체크'}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onToggle();
+          }
+        }}
+        className={`flex cursor-pointer flex-wrap items-center gap-3 rounded-2xl border-2 p-3 transition select-none ${
+          task.done
+            ? 'border-emerald-300 bg-emerald-50'
+            : started
+              ? 'border-amber-200 bg-amber-50/60 hover:border-rose-200'
+              : 'border-amber-100 bg-white hover:border-rose-200'
+        } ${justChecked ? 'animate-task-pop' : ''}`}
       >
-        {task.done ? '✓' : category?.emoji}
-      </button>
-      <div className="min-w-0 flex-1">
-        <p className={`truncate font-extrabold ${task.done ? 'text-emerald-600 line-through' : 'text-stone-700'}`}>
-          {task.title || task.workbook}
-        </p>
-        <p className="truncate text-xs font-bold text-stone-400">
-          {category?.label} · {task.workbook} · 목표 {task.amount}
-          {unitLabel}
-          {assigned && ' · ⏰ 시간표에 있음'}
-        </p>
+        <span
+          className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-2xl font-black transition ${
+            task.done ? 'bg-emerald-400 text-white' : 'bg-amber-100 text-amber-700'
+          } ${justChecked ? 'animate-check-stamp' : ''}`}
+          aria-hidden="true"
+        >
+          {task.done ? '✓' : category?.emoji}
+        </span>
+
+        <div className="min-w-0 flex-1">
+          <p
+            className={`truncate text-base font-extrabold ${
+              task.done ? 'text-emerald-600 line-through' : 'text-stone-700'
+            }`}
+          >
+            {task.title || task.workbook}
+          </p>
+          <p className="truncate text-xs font-bold text-stone-400">
+            {category?.label} · {task.workbook}
+            {assigned && ' · ⏰ 시간표에 있음'}
+          </p>
+          <div className="mt-1.5 flex items-center gap-2">
+            <span className="h-2 flex-1 overflow-hidden rounded-full bg-white">
+              <span
+                className={`block h-full rounded-full transition-all duration-300 ${
+                  task.done ? 'bg-emerald-400' : 'bg-rose-300'
+                }`}
+                style={{ width: `${Math.round(rate * 100)}%` }}
+              />
+            </span>
+            <span className="shrink-0 text-xs font-extrabold text-stone-500">
+              {doneAmount} / {task.amount}
+              {unitLabel}
+            </span>
+          </div>
+        </div>
+
+        {/* 조금씩 한 날을 위한 −/+ 버튼. 카드 토글과 겹치지 않게 클릭 전파를 막는다. */}
+        <div
+          className="flex shrink-0 items-center gap-1"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            onClick={() => onStep(-1)}
+            disabled={doneAmount <= 0}
+            className="h-10 w-10 rounded-full bg-white text-lg font-black text-stone-500 shadow-sm transition hover:bg-amber-100 disabled:opacity-30"
+            aria-label="한 만큼 줄이기"
+          >
+            −
+          </button>
+          <button
+            type="button"
+            onClick={() => onStep(1)}
+            disabled={doneAmount >= task.amount}
+            className="h-10 w-10 rounded-full bg-white text-lg font-black text-rose-500 shadow-sm transition hover:bg-rose-100 disabled:opacity-30"
+            aria-label="한 만큼 늘리기"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            onClick={onRemove}
+            className="ml-1 rounded-full bg-stone-100 px-3 py-2 text-xs font-bold text-stone-400 transition hover:bg-rose-100 hover:text-rose-500"
+          >
+            삭제
+          </button>
+        </div>
       </div>
-      <label className="flex items-center gap-1 text-xs font-bold text-stone-500">
-        한 만큼
-        <input
-          type="number"
-          min="0"
-          max={task.amount}
-          value={task.doneAmount}
-          onChange={(e) => onChangeDone(e.target.value)}
-          className="w-16 rounded-xl border-2 border-amber-100 px-2 py-1 text-right font-extrabold text-stone-700"
-        />
-        {unitLabel}
-      </label>
-      <button
-        type="button"
-        onClick={onRemove}
-        className="rounded-full bg-stone-100 px-3 py-1 text-xs font-bold text-stone-400 hover:bg-rose-100 hover:text-rose-500"
-      >
-        삭제
-      </button>
     </li>
   );
 }
