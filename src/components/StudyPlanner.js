@@ -38,6 +38,7 @@ import {
   recalcAfterMiss,
   listStudyDates,
 } from '@/lib/planner';
+import { daysUntil, formatDday } from '@/lib/smartSchedule';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -215,7 +216,91 @@ function Modal({ title, subtitle, onClose, children, maxWidth = 'max-w-lg' }) {
 // 메인 컴포넌트
 // ---------------------------------------------------------------------------
 
-export default function StudyPlanner({ userName, onPointsAwarded }) {
+// 월간 플래너에서 저장한 시험 설정을 바탕으로 '추천 기간 목표'를 보여주는 폼.
+// 추천 진도(하루 권장량)를 자동 계산하고, 사용자가 총량/마감일을 수정한 뒤 목표로 저장할 수 있다.
+function ExamGoalSuggestion({ examConfig, completedProblems = 0, onAdd }) {
+  const today = toDateKey();
+  const configured = Boolean(examConfig?.examDate) && Number(examConfig?.totalProblems) > 0;
+  const scopeLabel = examConfig?.scopeLabel || '시험 범위';
+  const remaining = Math.max(0, Math.round(Number(examConfig?.totalProblems) || 0) - completedProblems);
+
+  const [total, setTotal] = useState(remaining);
+  const [endDate, setEndDate] = useState(examConfig?.examDate || addDays(today, 13));
+
+  // 시험 설정이 바뀌면 추천값을 다시 채운다.
+  useEffect(() => {
+    setTotal(remaining);
+    setEndDate(examConfig?.examDate || addDays(today, 13));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [examConfig?.examDate, examConfig?.totalProblems, completedProblems]);
+
+  if (!configured) {
+    return (
+      <div className="mb-3 rounded-2xl border-2 border-dashed border-amber-200 bg-amber-50/60 px-4 py-3 text-center text-sm font-bold text-stone-500">
+        📅 <span className="text-rose-500">[월간 플래너]</span> 탭에서 시험 날짜와 범위를 저장하면,
+        여기에 추천 진도가 자동으로 떠요! 🐾
+      </div>
+    );
+  }
+
+  const studyDays = listStudyDates(today, endDate, [], []).length;
+  const perDay = studyDays > 0 ? Math.ceil(Math.max(0, Number(total) || 0) / studyDays) : Number(total) || 0;
+
+  return (
+    <div className="mb-3 rounded-2xl border-2 border-rose-100 bg-rose-50/50 p-4">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-extrabold text-rose-500">🐶 강아지 튜터 추천 목표 · {scopeLabel}</p>
+        <span className="rounded-full bg-rose-400 px-3 py-1 text-xs font-black text-white">
+          {formatDday(examConfig.examDate)}
+        </span>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="block">
+          <span className="mb-1 block text-xs font-extrabold text-stone-500">남은 문제 수(수정 가능)</span>
+          <input
+            type="number"
+            min="1"
+            value={total}
+            onChange={(e) => setTotal(e.target.value)}
+            className="w-full rounded-2xl border-2 border-amber-100 bg-white px-4 py-2 text-right font-extrabold text-stone-700 outline-none focus:border-rose-300"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-extrabold text-stone-500">끝내는 날(수정 가능)</span>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            className="w-full rounded-2xl border-2 border-amber-100 bg-white px-4 py-2 font-bold text-stone-700 outline-none focus:border-rose-300"
+          />
+        </label>
+      </div>
+      <p className="mt-2 rounded-2xl bg-white px-4 py-2 text-center text-sm font-extrabold text-rose-500">
+        🐾 {studyDays}일 동안 하루 {perDay}문제씩 풀면 끝나요!
+      </p>
+      <button
+        type="button"
+        disabled={Number(total) <= 0}
+        onClick={() =>
+          onAdd({
+            category: 'HW_HWANGSO',
+            workbook: scopeLabel,
+            title: `${scopeLabel} 시험대비`,
+            unit: 'problem',
+            totalAmount: Math.max(0, Math.round(Number(total) || 0)),
+            startDate: today,
+            endDate,
+          })
+        }
+        className="mt-2 w-full rounded-full bg-rose-400 px-5 py-2.5 text-sm font-extrabold text-white shadow-md hover:bg-rose-500 disabled:bg-stone-200 disabled:text-stone-400"
+      >
+        🎯 이 추천을 기간 목표로 추가하기
+      </button>
+    </div>
+  );
+}
+
+export default function StudyPlanner({ userName, onPointsAwarded, examConfig, completedProblems = 0 }) {
   const todayKey = toDateKey();
   const [date, setDate] = useState(todayKey);
   const [planner, setPlanner] = useState(() => ({ goals: [], days: {} }));
@@ -696,6 +781,11 @@ export default function StudyPlanner({ userName, onPointsAwarded }) {
               + 목표 만들기
             </button>
           }
+        />
+        <ExamGoalSuggestion
+          examConfig={examConfig}
+          completedProblems={completedProblems}
+          onAdd={handleAddGoal}
         />
         {goals.length === 0 ? (
           <p className="rounded-2xl bg-amber-50 p-6 text-center text-sm font-bold text-stone-400">

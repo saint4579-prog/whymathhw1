@@ -5,8 +5,13 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 
 const PEN_WIDTH = 2.5;
 const ERASER_WIDTH = 24;
 
+// 그리기를 허용할 포인터 종류. 아이패드에서는 애플펜슬이 'pen'으로 들어온다.
+// 손가락은 'touch'라서 여기서 걸러지고(그리기 무시) → 화면 스크롤/확대에 쓰인다.
+// 데스크톱 마우스('mouse')는 개발/검수용으로 함께 허용한다. (아이패드에는 mouse 포인터가 없어 사실상 펜 전용)
+const isDrawingPointer = (event) => event.pointerType === 'pen' || event.pointerType === 'mouse';
+
 const Canvas = forwardRef(function Canvas(
-  { disabled = false, onDrawEnd, color = '#1e293b', tool = 'pen' },
+  { disabled = false, onDrawEnd, color = '#1e293b', tool = 'pen', bgImage = null, bgOpacity = 0.55 },
   ref
 ) {
   const containerRef = useRef(null);
@@ -162,16 +167,23 @@ const Canvas = forwardRef(function Canvas(
   };
 
   const handlePointerDown = (event) => {
-    if (disabled || event.pointerType === 'touch') return;
+    // 펜(애플펜슬)/마우스만 그린다. 손가락 터치는 무시해 스크롤/확대가 가능하게 둔다.
+    if (disabled || !isDrawingPointer(event)) return;
     event.preventDefault();
-    canvasRef.current.setPointerCapture(event.pointerId);
+    // 포인터 캡처는 그리는 중 손가락이 캔버스 밖으로 나가도 계속 추적하게 해준다.
+    // 일부 환경에서 예외가 날 수 있으므로 방어적으로 감싼다.
+    try {
+      canvasRef.current.setPointerCapture(event.pointerId);
+    } catch {
+      // 캡처 실패는 무시하고 그리기는 계속 진행한다.
+    }
     isDrawingRef.current = true;
     lastPointRef.current = getPos(event);
     applyBrush();
   };
 
   const handlePointerMove = (event) => {
-    if (disabled || event.pointerType === 'touch' || !isDrawingRef.current) return;
+    if (disabled || !isDrawingPointer(event) || !isDrawingRef.current) return;
     event.preventDefault();
     const ctx = getContext();
     if (!ctx) return;
@@ -186,7 +198,7 @@ const Canvas = forwardRef(function Canvas(
   };
 
   const stopDrawing = (event) => {
-    if (event.pointerType === 'touch') return;
+    if (!isDrawingPointer(event)) return;
     const wasDrawing = isDrawingRef.current;
     isDrawingRef.current = false;
     if (wasDrawing) onDrawEnd?.(hasContentRef.current);
@@ -196,13 +208,28 @@ const Canvas = forwardRef(function Canvas(
     <div
       ref={containerRef}
       className="relative h-full w-full overflow-hidden rounded-2xl border-4 border-dashed border-rose-200 bg-white"
-      style={{ touchAction: 'none' }}
+      // 손가락 터치로는 화면 스크롤/확대(핀치 줌)가 되도록 터치 제스처를 브라우저에 넘긴다.
+      // 펜/마우스로 그릴 때는 핸들러에서 preventDefault 하므로 그리는 중 스크롤되지 않는다.
+      style={{ touchAction: 'pan-x pan-y pinch-zoom' }}
     >
+      {/* 문제 이미지를 캔버스 바탕에 반투명하게 깔아, 그 위에 바로 풀이를 쓸 수 있게 한다. */}
+      {bgImage && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={bgImage}
+          alt=""
+          aria-hidden="true"
+          draggable={false}
+          className="pointer-events-none absolute inset-0 h-full w-full select-none object-contain"
+          style={{ opacity: bgOpacity }}
+        />
+      )}
       <span className="pointer-events-none absolute left-2 top-2 select-none text-lg opacity-40">🐾</span>
       <span className="pointer-events-none absolute bottom-2 right-2 select-none text-lg opacity-40">🐾</span>
       <canvas
         ref={canvasRef}
-        className={`absolute inset-0 h-full w-full touch-none ${disabled ? 'pointer-events-none' : ''}`}
+        className={`absolute inset-0 h-full w-full ${disabled ? 'pointer-events-none' : ''}`}
+        style={{ touchAction: 'pan-x pan-y pinch-zoom' }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={stopDrawing}

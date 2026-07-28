@@ -3,6 +3,8 @@
 import { useMemo, useState } from 'react';
 import ProblemListTable from './ProblemListTable';
 import MockExamBoard from './MockExamBoard';
+import HwangsoBoard from './HwangsoBoard';
+import { hwangsoConceptList, HWANGSO_UNITS, unitLabel } from '@/lib/hwangso';
 import { isSolved, extractPageNumber } from '@/lib/problemUtils';
 import { buildHintResultMessage, prepareGeminiHint } from '@/lib/geminiPrompt';
 import { CHARACTERS } from '@/lib/characters';
@@ -11,6 +13,7 @@ import CharacterMascot from './CharacterMascot';
 const WORKBOOKS = [
   { id: 'yi', label: '와이수학-대수-공통수학1' },
   { id: 'mockExam', label: '영재원 대비_모의고사' },
+  { id: 'hwangso', label: '황소 중2상 1차단평대비' },
 ];
 
 function WorkbookTabs({ activeWorkbook, onWorkbookChange }) {
@@ -56,6 +59,101 @@ function SummaryCard({ label, value, character }) {
   );
 }
 
+function percent(part, whole) {
+  if (!whole) return 0;
+  return Math.round((part / whole) * 100);
+}
+
+// 단원별 대표 주제명. (통계 첫 줄에 "1단원 유리수와 순환소수 ..." 처럼 보여줄 때 사용)
+const HWANGSO_UNIT_THEMES = {
+  U1: '유리수와 순환소수',
+};
+
+// [황소 중2상 1차단평대비] 상세 통계 패널.
+// 상단 [1단원]/[2단원]/[3단원] 탭으로 단원을 고르면, 그 단원의 진도와 개념탐구별 정답률만 보여준다.
+function HwangsoStatsPanel({ problems }) {
+  const [activeStatsTab, setActiveStatsTab] = useState('U1');
+
+  const unitProblems = problems.filter((p) => p.unit === activeStatsTab);
+  const total = unitProblems.length;
+  const solved = unitProblems.filter(isSolved).length;
+  const theme = HWANGSO_UNIT_THEMES[activeStatsTab];
+
+  const conceptStats = hwangsoConceptList(activeStatsTab).map((concept) => {
+    const list = unitProblems.filter((p) => p.conceptId === concept.id);
+    const correct = list.filter((p) => p.isCorrect === 'O').length;
+    return { ...concept, total: list.length, correct, pct: percent(correct, list.length) };
+  });
+
+  const hasData = conceptStats.length > 0;
+
+  return (
+    <div className="flex-1 rounded-3xl border-2 border-rose-100 bg-white p-4 shadow-lg shadow-amber-100/60">
+      {/* 제목 + 단원 탭 */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-extrabold text-amber-600">📊 상세 통계</h3>
+        <div className="flex gap-1">
+          {HWANGSO_UNITS.map((unit) => {
+            const active = activeStatsTab === unit.id;
+            return (
+              <button
+                key={unit.id}
+                type="button"
+                onClick={() => setActiveStatsTab(unit.id)}
+                className={`rounded-full px-3 py-1 text-xs font-extrabold transition ${
+                  active
+                    ? 'bg-rose-400 text-white shadow-sm shadow-rose-200'
+                    : 'bg-amber-50 text-amber-600 hover:bg-amber-100'
+                }`}
+              >
+                {unit.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <p className="mb-3 rounded-2xl bg-amber-50 px-4 py-2.5 text-sm font-bold text-stone-700">
+        통계 : {unitLabel(activeStatsTab)}
+        {theme ? ` ${theme}` : ''} 학습개수{' '}
+        <span className="text-stone-800">
+          {solved}/{total}
+        </span>{' '}
+        <span className="font-extrabold text-rose-500">→ {percent(solved, total)}%</span>
+      </p>
+
+      {hasData ? (
+        <ul className="grid grid-cols-1 gap-x-4 gap-y-2 md:grid-cols-2">
+          {conceptStats.map((concept) => (
+            <li key={concept.id} className="rounded-2xl bg-amber-50/50 px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-bold text-stone-600">
+                  개탐{concept.num} 정답률{' '}
+                  <span className="text-xs font-semibold text-amber-500">({concept.name})</span>
+                </span>
+                <span className="shrink-0 text-sm font-bold text-stone-700">
+                  {concept.correct}/{concept.total}{' '}
+                  <span className="font-extrabold text-rose-500">→ {concept.pct}%</span>
+                </span>
+              </div>
+              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-white">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-rose-400 to-amber-400 transition-all"
+                  style={{ width: `${concept.pct}%` }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="rounded-2xl bg-amber-50/50 px-4 py-8 text-center text-sm font-bold text-stone-400">
+          🐾 {unitLabel(activeStatsTab)}은 업데이트 예정입니다
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function Dashboard({
   problems,
   onSolve,
@@ -70,6 +168,9 @@ export default function Dashboard({
   mockExamProblems = [],
   onSolveMockExam,
   onSolveMockGoal,
+  hwangsoProblems = [],
+  onSolveHwangso,
+  onSolveHwangsoGoal,
 }) {
   const [copying, setCopying] = useState(false);
   const [startPage, setStartPage] = useState('');
@@ -159,6 +260,32 @@ export default function Dashboard({
           problems={mockExamProblems}
           onSolve={onSolveMockExam}
           onSolveGoal={onSolveMockGoal}
+        />
+      </div>
+    );
+  }
+
+  if (activeWorkbook === 'hwangso') {
+    const hwangsoTotal = hwangsoProblems.length;
+    const hwangsoSolvedCount = hwangsoProblems.filter(isSolved).length;
+    const hwangsoCorrectCount = hwangsoProblems.filter((p) => p.isCorrect === 'O').length;
+    return (
+      <div className="mx-auto max-w-6xl">
+        <WorkbookTabs activeWorkbook={activeWorkbook} onWorkbookChange={onWorkbookChange} />
+        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-stretch">
+          {/* 좌측: 폭을 줄인 요약 카드 3개 */}
+          <div className="grid grid-cols-3 gap-3 lg:w-[340px] lg:shrink-0">
+            <SummaryCard label="전체 문제" value={hwangsoTotal} character="elephant" />
+            <SummaryCard label="풀이 완료" value={hwangsoSolvedCount} character="chick" />
+            <SummaryCard label="정답 수" value={hwangsoCorrectCount} character="fox" />
+          </div>
+          {/* 우측: 상세 통계 패널 */}
+          <HwangsoStatsPanel problems={hwangsoProblems} />
+        </div>
+        <HwangsoBoard
+          problems={hwangsoProblems}
+          onSolve={onSolveHwangso}
+          onSolveGoal={onSolveHwangsoGoal}
         />
       </div>
     );

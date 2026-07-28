@@ -7,18 +7,22 @@ import WrongNotebook from '@/components/WrongNotebook';
 import ReviewMode from '@/components/ReviewMode';
 import ProblemSolver from '@/components/ProblemSolver';
 import MockExamSolver from '@/components/MockExamSolver';
+import HwangsoSolver from '@/components/HwangsoSolver';
 import MonthlyPlanner from '@/components/MonthlyPlanner';
 import StudyPlanner from '@/components/StudyPlanner';
+import TodayTodo from '@/components/TodayTodo';
 import RewardStore from '@/components/RewardStore';
 import CharacterCollection from '@/components/CharacterCollection';
 import LevelUpModal from '@/components/LevelUpModal';
 import UserRegistration from '@/components/UserRegistration';
 import CharacterMascot from '@/components/CharacterMascot';
 import { fetchProblems, redeemPoints, registerUser, submitGrade } from '@/lib/api';
+import { fetchHwangsoProblems, loadHwangsoRecords, appendHwangsoRecord } from '@/lib/hwangso';
+import { loadExamConfig, saveExamConfig, defaultExamConfig } from '@/lib/smartSchedule';
 import { toISODate } from '@/lib/dateUtils';
 import { getPointsForAnswer } from '@/lib/points';
 import { getCollectionState } from '@/lib/levels';
-import { sortProblemsByPage } from '@/lib/problemUtils';
+import { sortProblemsByPage, isSolved } from '@/lib/problemUtils';
 import { recordAttempt } from '@/lib/reviewSchedule';
 
 const POINT_HISTORY_KEY = 'dog-math-point-history';
@@ -105,6 +109,10 @@ export default function Home() {
   const [problems, setProblems] = useState([]);
   // [영재원 대비_모의고사] 문제집. 전체 현황판에서 선택하는 문제집 탭에 따라 이 목록이 노출된다.
   const [mockExamProblems, setMockExamProblems] = useState([]);
+  // [황소 중2상 1차단평대비] 문제집. public/data/문항목록.csv 를 프론트에서 직접 파싱해 채운다.
+  const [hwangsoProblems, setHwangsoProblems] = useState([]);
+  // 스마트 추천 시간표용 시험 설정(D-day/범위). 월간·스터디·오늘 할 일 탭이 공유한다.
+  const [examConfig, setExamConfig] = useState(defaultExamConfig);
   // 전체 현황판에서 어느 문제집 탭이 선택되어 있는지 ('yi' | 'mockExam')
   const [activeWorkbook, setActiveWorkbook] = useState('yi');
   const [loading, setLoading] = useState(true);
@@ -240,6 +248,52 @@ export default function Home() {
     if (userInfo) loadProblems();
   }, [loadProblems, userInfo]);
 
+  // [황소 중2상 1차단평대비] 문제 목록을 CSV에서 한 번 불러온다.
+  // 실패해도 다른 문제집 사용에는 지장이 없으므로 조용히 빈 목록으로 둔다.
+  useEffect(() => {
+    if (!userInfo) return;
+    let cancelled = false;
+    fetchHwangsoProblems()
+      .then((list) => {
+        if (cancelled) return;
+        // 이 학생의 과거 채점 기록(O/X)을 localStorage에서 읽어 각 문제에 붙인다.
+        const records = loadHwangsoRecords(userInfo?.name);
+        setHwangsoProblems(
+          list.map((p) => {
+            const marks = Array.isArray(records[p.fileName]) ? records[p.fileName] : [];
+            return {
+              ...p,
+              historyLogs: marks.map((mark) => ({ isCorrect: mark })),
+              reviewCount: marks.length,
+              // 상태 뱃지는 가장 최근 채점 결과를 따른다.
+              isCorrect: marks.length > 0 ? marks[marks.length - 1] : null,
+              submitted: marks.length > 0,
+            };
+          })
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setHwangsoProblems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userInfo]);
+
+  // 시험 설정(D-day/범위)을 localStorage에서 불러온다.
+  useEffect(() => {
+    if (userInfo) setExamConfig(loadExamConfig(userInfo?.name));
+  }, [userInfo]);
+
+  // 월간 플래너에서 시험 설정을 바꾸면 즉시 저장하고 모든 탭에 반영한다.
+  const handleExamConfigChange = useCallback(
+    (next) => {
+      setExamConfig(next);
+      saveExamConfig(userInfo?.name, next);
+    },
+    [userInfo]
+  );
+
   const handleRegisterUser = async ({ grade, name, gender }) => {
     const response = await registerUser(grade, name, gender);
     const responseRoot = getPayloadRoot(response);
@@ -273,6 +327,32 @@ export default function Home() {
   // 모의고사 현황판에서 체크박스로 고른 문제들만 순서대로 푼다. (오늘의 학습 목표)
   const handleSolveMockGoal = (list) =>
     startSolving(list, null, '오늘의 모의고사 목표', 'mockExam');
+
+  const handleSolveHwangso = (rowNumber) =>
+    startSolving(hwangsoProblems, rowNumber, '황소 중2상 1차단평대비', 'hwangso');
+
+  const handleSolveHwangsoGoal = (list) =>
+    startSolving(list, null, '오늘의 황소 목표', 'hwangso');
+
+  // 황소 문제집은 구글 시트가 아니라 CSV 기반이라, 채점 결과를 서버로 보내지 않고
+  // 브라우저 localStorage에 O/X 기록만 남기고 화면 상태를 갱신한다.
+  const handleGradeHwangso = async (problem, isCorrect) => {
+    // localStorage에 O/X를 이어 붙이고, 갱신된 전체 기록 배열을 돌려받는다.
+    const marks = appendHwangsoRecord(userInfo?.name, problem.fileName, isCorrect);
+    setHwangsoProblems((prev) =>
+      prev.map((p) =>
+        p.rowNumber === problem.rowNumber
+          ? {
+              ...p,
+              submitted: true,
+              isCorrect,
+              reviewCount: marks.length,
+              historyLogs: marks.map((mark) => ({ isCorrect: mark })),
+            }
+          : p
+      )
+    );
+  };
 
   const handleSolveFromWrongNotes = (rowNumber) => {
     const wrongList = problems.filter((p) => p.isCorrect === 'X');
@@ -564,6 +644,9 @@ export default function Home() {
             mockExamProblems={mockExamProblems}
             onSolveMockExam={handleSolveMockExam}
             onSolveMockGoal={handleSolveMockGoal}
+            hwangsoProblems={hwangsoProblems}
+            onSolveHwangso={handleSolveHwangso}
+            onSolveHwangsoGoal={handleSolveHwangsoGoal}
           />
         )}
         {!loading && !error && activeTab === 'wrongNotes' && (
@@ -587,7 +670,18 @@ export default function Home() {
             onFinish={() => setActiveTab('dashboard')}
           />
         )}
-        {!loading && !error && activeTab === 'solver' && solverWorkbook !== 'mockExam' && (
+        {!loading && !error && activeTab === 'solver' && solverWorkbook === 'hwangso' && (
+          <HwangsoSolver
+            queue={solverQueue}
+            setQueue={setSolverQueue}
+            index={solverIndex}
+            setIndex={setSolverIndex}
+            onGrade={handleGradeHwangso}
+            queueLabel={solverLabel}
+            onFinish={() => setActiveTab('dashboard')}
+          />
+        )}
+        {!loading && !error && activeTab === 'solver' && solverWorkbook === 'yi' && (
           <ProblemSolver
             queue={solverQueue}
             setQueue={setSolverQueue}
@@ -598,14 +692,27 @@ export default function Home() {
             onFinish={() => setActiveTab('dashboard')}
           />
         )}
+        {!loading && !error && activeTab === 'todo' && (
+          <TodayTodo
+            userName={userInfo?.name}
+            examConfig={examConfig}
+            completedProblems={hwangsoProblems.filter(isSolved).length}
+          />
+        )}
         {!loading && !error && activeTab === 'studyPlanner' && (
           <StudyPlanner
             userName={userInfo?.name}
             onPointsAwarded={handlePlannerPointsAwarded}
+            examConfig={examConfig}
+            completedProblems={hwangsoProblems.filter(isSolved).length}
           />
         )}
         {!loading && !error && activeTab === 'planner' && (
-          <MonthlyPlanner dailyStats={dailyStats} />
+          <MonthlyPlanner
+            dailyStats={dailyStats}
+            examConfig={examConfig}
+            onExamConfigChange={handleExamConfigChange}
+          />
         )}
         {!loading && !error && activeTab === 'store' && (
           <RewardStore

@@ -7,6 +7,7 @@ const TABS = [
   { key: 'wrongNotes', label: '❌ 오답노트' },
   { key: 'review', label: '🔄 망각곡선 복습' },
   { key: 'solver', label: '✍️ 문제 풀기' },
+  { key: 'todo', label: '🐶 오늘 할 일' },
   { key: 'studyPlanner', label: '📝 스터디 플래너' },
   { key: 'planner', label: '📅 월간 플래너' },
   { key: 'store', label: '🎁 보상 상점' },
