@@ -46,7 +46,7 @@ export function getDueRowNumbers(problems) {
   if (typeof window === 'undefined') return [];
   const schedule = loadSchedule();
   return problems
-    .filter((p) => p.isCorrect === 'O' || p.isCorrect === 'X')
+    .filter((p) => p.isCorrect === 'O' || p.isCorrect === 'X' || p.isCorrect === '△')
     .filter((p) => isDue(schedule[p.rowNumber]))
     .map((p) => p.rowNumber);
 }

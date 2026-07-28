@@ -4,6 +4,8 @@
 // (public/data/문항목록.csv)에서 프론트엔드가 직접 읽어온다.
 // 문제 이미지는 public/images/hwangso/<학기>/<파일명> 에 들어 있다.
 
+import { HWANGSO_DATA, hwangsoImageUrl } from './hwangsoData';
+
 const CSV_PATH = '/data/문항목록.csv';
 const IMAGE_BASE = '/images/hwangso';
 
@@ -145,9 +147,10 @@ function toProblem(row, order) {
       mainNum,
       subNum,
     }),
-    answer: row.answer || '',
-    // <img src>로 바로 쓸 수 있는 public 경로.
-    imageUrl: `${IMAGE_BASE}/${gradeTerm}/${fileName}`,
+    // 정답: 코드에 내장한 정답표(hwangsoData) 우선, 없으면 CSV 값.
+    answer: (HWANGSO_DATA[fileName]?.a ?? '') || row.answer || '',
+    // 이미지: 구글 드라이브(lh3, CORS 허용) 우선, 없으면 로컬 public 경로로 폴백.
+    imageUrl: hwangsoImageUrl(fileName) || `${IMAGE_BASE}/${gradeTerm}/${fileName}`,
     // 로컬(브라우저) 상태로만 관리하는 채점/복습 정보.
     isCorrect: null,
     reviewCount: 0,

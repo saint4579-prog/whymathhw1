@@ -16,7 +16,7 @@ import CharacterCollection from '@/components/CharacterCollection';
 import LevelUpModal from '@/components/LevelUpModal';
 import UserRegistration from '@/components/UserRegistration';
 import CharacterMascot from '@/components/CharacterMascot';
-import { fetchProblems, redeemPoints, registerUser, submitGrade } from '@/lib/api';
+import { fetchProblems, redeemPoints, registerUser, submitGrade, fetchPlanner, patchPlanner } from '@/lib/api';
 import { fetchHwangsoProblems, loadHwangsoRecords, appendHwangsoRecord } from '@/lib/hwangso';
 import { loadExamConfig, saveExamConfig, defaultExamConfig } from '@/lib/smartSchedule';
 import { toISODate } from '@/lib/dateUtils';
@@ -113,6 +113,8 @@ export default function Home() {
   const [hwangsoProblems, setHwangsoProblems] = useState([]);
   // 스마트 추천 시간표용 시험 설정(D-day/범위). 월간·스터디·오늘 할 일 탭이 공유한다.
   const [examConfig, setExamConfig] = useState(defaultExamConfig);
+  // 시험 설정을 GAS(구글 시트)에서 불러오는 중인지 여부. (월간 플래너 로딩 표시용)
+  const [examConfigLoading, setExamConfigLoading] = useState(true);
   // 전체 현황판에서 어느 문제집 탭이 선택되어 있는지 ('yi' | 'mockExam')
   const [activeWorkbook, setActiveWorkbook] = useState('yi');
   const [loading, setLoading] = useState(true);
@@ -151,6 +153,12 @@ export default function Home() {
   const collection = useMemo(
     () => getCollectionState(totalEarnedPoints),
     [totalEarnedPoints]
+  );
+
+  // 망각곡선 복습 대상: 와이수학 + 황소 문제를 합쳐서 계산한다. (황소도 다음날 복습에 뜨도록)
+  const reviewProblems = useMemo(
+    () => [...problems, ...hwangsoProblems],
+    [problems, hwangsoProblems]
   );
 
   // 누적 포인트가 늘어 레벨이 오르면 축하 모달을 띄운다.
@@ -280,16 +288,38 @@ export default function Home() {
     };
   }, [userInfo]);
 
-  // 시험 설정(D-day/범위)을 localStorage에서 불러온다.
+  // 시험 설정(D-day/범위)을 불러온다.
+  // 1) 즉시 localStorage 캐시로 화면을 채우고, 2) GAS(구글 시트)에서 최신값을 받아 덮어쓴다.
   useEffect(() => {
-    if (userInfo) setExamConfig(loadExamConfig(userInfo?.name));
+    if (!userInfo) return undefined;
+    let cancelled = false;
+    setExamConfigLoading(true);
+    // 빠른 표시: 로컬 캐시 먼저
+    setExamConfig(loadExamConfig(userInfo?.name));
+    (async () => {
+      try {
+        const { planner } = await fetchPlanner(userInfo?.name);
+        if (!cancelled && planner?.examConfig) {
+          setExamConfig(planner.examConfig);
+          saveExamConfig(userInfo?.name, planner.examConfig); // 로컬 캐시 동기화
+        }
+      } catch {
+        // GAS 미연동/실패 시 로컬 캐시값을 그대로 사용한다.
+      } finally {
+        if (!cancelled) setExamConfigLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [userInfo]);
 
-  // 월간 플래너에서 시험 설정을 바꾸면 즉시 저장하고 모든 탭에 반영한다.
+  // 월간 플래너에서 시험 설정을 바꾸면 즉시 화면/캐시에 반영하고 GAS에도 영구 저장한다.
   const handleExamConfigChange = useCallback(
     (next) => {
       setExamConfig(next);
-      saveExamConfig(userInfo?.name, next);
+      saveExamConfig(userInfo?.name, next); // 로컬 캐시(즉시)
+      patchPlanner(userInfo?.name, { examConfig: next }); // GAS 영구 저장(비동기, 실패 시 캐시 유지)
     },
     [userInfo]
   );
@@ -334,10 +364,12 @@ export default function Home() {
   const handleSolveHwangsoGoal = (list) =>
     startSolving(list, null, '오늘의 황소 목표', 'hwangso');
 
-  // 황소 문제집은 구글 시트가 아니라 CSV 기반이라, 채점 결과를 서버로 보내지 않고
-  // 브라우저 localStorage에 O/X 기록만 남기고 화면 상태를 갱신한다.
-  const handleGradeHwangso = async (problem, isCorrect) => {
-    // localStorage에 O/X를 이어 붙이고, 갱신된 전체 기록 배열을 돌려받는다.
+  // 황소 채점: ①브라우저 O/△/X 기록 ②망각곡선 복습 스케줄 ③구글 시트 학습기록(정답여부/푼날짜)에 모두 남긴다.
+  // 학습기록/복습은 O/X 기준이라 △는 X(다시 볼 것)로 매핑해 기록한다. (화면 뱃지는 △ 그대로 유지)
+  const handleGradeHwangso = async (problem, isCorrect, canvasImage, solveTimeSec) => {
+    const gasMark = isCorrect === 'O' ? 'O' : 'X'; // 시트/복습용 O·X (△·X → X)
+
+    // ① 브라우저 로컬 O/△/X 기록
     const marks = appendHwangsoRecord(userInfo?.name, problem.fileName, isCorrect);
     setHwangsoProblems((prev) =>
       prev.map((p) =>
@@ -352,6 +384,24 @@ export default function Home() {
           : p
       )
     );
+
+    // ② 망각곡선 복습 스케줄: 오늘 풀었으니 내일부터 복습 대상으로 뜬다.
+    recordAttempt(problem.rowNumber, gasMark);
+
+    // ③ 구글 시트 학습기록에 남긴다. (콘텐츠 코드=파일명, 정답여부, 푼 날짜, 학생 이름)
+    //    실패해도 로컬 기록/복습은 유지되도록 조용히 무시한다.
+    try {
+      await submitGrade(
+        problem.rowNumber,
+        gasMark,
+        problem.code,
+        canvasImage ?? null,
+        solveTimeSec ?? 1,
+        userInfo?.name
+      );
+    } catch {
+      // 시트 기록 실패는 무시 (다음 풀이 때 다시 시도)
+    }
   };
 
   const handleSolveFromWrongNotes = (rowNumber) => {
@@ -654,7 +704,7 @@ export default function Home() {
         )}
         {!loading && !error && activeTab === 'review' && (
           <ReviewMode
-            problems={problems}
+            problems={reviewProblems}
             onSolve={handleSolveFromReview}
             onStartReview={handleStartReview}
           />
@@ -712,6 +762,7 @@ export default function Home() {
             dailyStats={dailyStats}
             examConfig={examConfig}
             onExamConfigChange={handleExamConfigChange}
+            examConfigLoading={examConfigLoading}
           />
         )}
         {!loading && !error && activeTab === 'store' && (

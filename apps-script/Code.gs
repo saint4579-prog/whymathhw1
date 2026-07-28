@@ -3,6 +3,8 @@ var MOCK_EXAM_SHEET_NAME = '모의고사문제목록';
 var STUDY_LOG_SHEET_NAME = '학습기록';
 var POINT_LOG_SHEET_NAME = '포인트기록';
 var USER_SHEET_NAME = '사용자정보';
+// 스터디 플래너/시험 대비 설정/학원 숙제를 사용자별 JSON 한 덩어리로 저장하는 시트.
+var PLANNER_SHEET_NAME = '플래너';
 var PROBLEM_IMAGE_FOLDER_ID = '1QPpZq4iDvnVVaswFQd6YLgY2d4IEGbqG';
 var ANSWER_IMAGE_FOLDER_ID = '1YOtQiOrjbxDh3DNwgdwkA65C9bkbdhDr';
 var TIME_ZONE = 'Asia/Seoul';
@@ -51,6 +53,44 @@ function getOrCreateSheet(ss, name, headers) {
     sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
   }
   return sheet;
+}
+
+// ---------------------------------------------------------------------------
+// 스터디 플래너 저장/조회 (사용자별 JSON 블롭)
+// planner 블롭 = { goals, days, examConfig, academyHomework, ... } 형태의 자유 JSON.
+// ---------------------------------------------------------------------------
+
+function getPlannerForUser(ss, userName) {
+  var sheet = ss.getSheetByName(PLANNER_SHEET_NAME);
+  if (!sheet) return null;
+  var data = sheet.getDataRange().getValues();
+  var name = String(userName || '').trim();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0] || '').trim() === name) {
+      try {
+        return JSON.parse(data[i][1] || 'null');
+      } catch (e) {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+function savePlannerForUser(ss, userName, planner) {
+  var sheet = getOrCreateSheet(ss, PLANNER_SHEET_NAME, ['사용자', '플래너JSON', '수정일시']);
+  var name = String(userName || '').trim();
+  var json = JSON.stringify(planner || {});
+  var now = formatDateTime(new Date());
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0] || '').trim() === name) {
+      sheet.getRange(i + 1, 2).setValue(json);
+      sheet.getRange(i + 1, 3).setValue(now);
+      return;
+    }
+  }
+  sheet.appendRow([name, json, now]);
 }
 
 function getCurrentPoints(ss, userName) {
@@ -218,6 +258,15 @@ function doGet(e) {
     var targetUser = String(
       e && e.parameter && e.parameter.userName ? e.parameter.userName : ''
     ).trim();
+
+    // 스터디 플래너/시험 대비 설정 조회. (문제 목록 집계보다 먼저 빠르게 응답)
+    if (e && e.parameter && e.parameter.type === 'GET_PLANNER') {
+      return jsonResponse({
+        status: 'success',
+        planner: getPlannerForUser(ss, targetUser)
+      });
+    }
+
     var dailyStats = {};
     var reviewCounts = {};
     var problemLogs = {};
@@ -392,6 +441,35 @@ function doPost(e) {
         grade: params.grade || '',
         name: requestedName,
         gender: params.gender || ''
+      });
+    }
+
+    // 스터디 플래너/시험 대비 설정/학원 숙제 통째로 저장.
+    if (params.type === 'SAVE_PLANNER') {
+      savePlannerForUser(ss, params.userName, params.planner);
+      return jsonResponse({ status: 'success' });
+    }
+
+    // 하루 마감 시 달성률만큼 포인트 지급 (포인트기록 시트에 적립).
+    if (params.type === 'PLANNER_POINT') {
+      var plannerUser = String(params.userName || '').trim();
+      var plannerAmount = Math.max(0, Math.round(Number(params.amount) || 0));
+      if (plannerAmount > 0) {
+        var plannerPointSheet = getOrCreateSheet(
+          ss,
+          POINT_LOG_SHEET_NAME,
+          ['일시', '보상 내용', '변동 포인트', '사용자']
+        );
+        plannerPointSheet.appendRow([
+          formatDateTime(new Date()),
+          '스터디 플래너 달성',
+          plannerAmount,
+          plannerUser
+        ]);
+      }
+      return jsonResponse({
+        status: 'success',
+        currentPoints: getCurrentPoints(ss, plannerUser)
       });
     }
 

@@ -41,20 +41,21 @@ function SummaryCard({ label, value, character }) {
   const theme = character ? CHARACTERS[character] : null;
   return (
     <div
-      className={`relative overflow-hidden rounded-3xl border-2 bg-white p-4 text-center shadow-lg ${
+      className={`relative flex min-h-[96px] flex-col items-center justify-center overflow-hidden rounded-3xl border-2 bg-white p-4 text-center shadow-lg ${
         theme ? `${theme.ring} ${theme.glow}` : 'border-rose-100 shadow-amber-100/60'
       }`}
     >
+      {/* 캐릭터는 글자를 가리지 않도록 모서리에 옅은 워터마크로 깔고, 글자는 칸 중앙에 둔다. */}
       {character && (
         <CharacterMascot
           name={character}
-          height={46}
+          height={40}
           animate="none"
-          className="absolute -right-1 -top-1 opacity-90"
+          className="pointer-events-none absolute -bottom-2 -right-2 opacity-20"
         />
       )}
-      <p className="mb-1 text-xs font-semibold text-amber-500">{label}</p>
-      <p className="text-2xl font-extrabold text-stone-700">{value}</p>
+      <p className="relative z-10 mb-1 text-xs font-semibold text-amber-500">{label}</p>
+      <p className="relative z-10 text-2xl font-extrabold text-stone-700">{value}</p>
     </div>
   );
 }

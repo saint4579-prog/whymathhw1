@@ -7,7 +7,7 @@ import CharacterMascot from './CharacterMascot';
 
 // 시험 날짜(D-day)와 시험 범위(전체 문제 수)를 입력하는 카드.
 // 여기서 저장한 값이 [스터디 플래너]의 추천 목표와 [오늘 할 일]의 추천 시간표에 그대로 쓰인다.
-function ExamSetupCard({ examConfig, onExamConfigChange }) {
+function ExamSetupCard({ examConfig, onExamConfigChange, loading = false }) {
   const config = examConfig ?? defaultExamConfig();
   const [examDate, setExamDate] = useState(config.examDate || '');
   const [totalProblems, setTotalProblems] = useState(config.totalProblems || 0);
@@ -40,11 +40,17 @@ function ExamSetupCard({ examConfig, onExamConfigChange }) {
           <p className="text-xs font-bold text-rose-400">🐾 시험을 정하면 강아지 튜터가 진도를 짜 줘요</p>
           <h3 className="text-lg font-extrabold text-stone-700">📌 시험 대비 설정 (D-day · 범위)</h3>
         </div>
-        {examDate && (
-          <span className="rounded-full bg-rose-400 px-4 py-1.5 text-sm font-black text-white shadow-md">
-            {formatDday(examDate)}
-            {dday != null && dday >= 0 ? ` · ${dday}일 남음` : ''}
+        {loading ? (
+          <span className="rounded-full bg-amber-100 px-4 py-1.5 text-sm font-bold text-amber-700">
+            🐾 설정 불러오는 중...
           </span>
+        ) : (
+          examDate && (
+            <span className="rounded-full bg-rose-400 px-4 py-1.5 text-sm font-black text-white shadow-md">
+              {formatDday(examDate)}
+              {dday != null && dday >= 0 ? ` · ${dday}일 남음` : ''}
+            </span>
+          )
         )}
       </div>
 
@@ -173,7 +179,7 @@ function DayDetailModal({ dateKey, stat, onClose }) {
   );
 }
 
-export default function MonthlyPlanner({ dailyStats = {}, examConfig, onExamConfigChange }) {
+export default function MonthlyPlanner({ dailyStats = {}, examConfig, onExamConfigChange, examConfigLoading = false }) {
   const today = new Date();
   const [viewDate, setViewDate] = useState(
     () => new Date(today.getFullYear(), today.getMonth(), 1)
@@ -208,7 +214,11 @@ export default function MonthlyPlanner({ dailyStats = {}, examConfig, onExamConf
 
   return (
     <div className="mx-auto max-w-7xl">
-      <ExamSetupCard examConfig={examConfig} onExamConfigChange={onExamConfigChange} />
+      <ExamSetupCard
+        examConfig={examConfig}
+        onExamConfigChange={onExamConfigChange}
+        loading={examConfigLoading}
+      />
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-3xl border-2 border-rose-100 bg-white p-4 shadow-lg shadow-amber-100/60">
         <div className="flex items-center gap-3">

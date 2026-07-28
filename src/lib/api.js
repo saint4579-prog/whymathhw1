@@ -145,6 +145,30 @@ export async function fetchPlanner(userName) {
   }
 }
 
+// 플래너 블롭의 일부 필드만 안전하게 바꿔 저장한다. (시험 대비 설정/학원 숙제 등)
+// 현재 블롭을 읽어(캐시 우선, 없으면 서버) patch를 얕은 병합한 뒤 통째로 저장하므로,
+// goals/days 같은 다른 필드를 덮어쓰지 않는다. GAS 저장이 실패해도 localStorage에는 남는다.
+export async function patchPlanner(userName, patch) {
+  const name = userName ?? getStoredUserName();
+  let base = readPlannerCache(name);
+  if (!base) {
+    try {
+      const { planner } = await fetchPlanner(name);
+      base = planner;
+    } catch {
+      base = null;
+    }
+  }
+  const next = { goals: [], days: {}, ...(base || {}), ...(patch || {}) };
+  writePlannerCache(name, next); // 낙관적 저장: 네트워크보다 먼저 로컬에 남긴다.
+  try {
+    await savePlanner(next, name);
+  } catch {
+    // 서버 저장 실패는 무시 (로컬 캐시로 유지). GAS 재배포 후 다음 저장부터 서버 반영됨.
+  }
+  return next;
+}
+
 // 목표/하루 계획 변경분을 시트에 통째로 저장한다. (마지막 저장이 이김 - 아이 1명이 쓰는 앱이라 충분)
 export async function savePlanner(planner, userName) {
   const name = userName ?? getStoredUserName();
