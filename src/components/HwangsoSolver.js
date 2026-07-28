@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import Canvas from './Canvas';
-import CanvasToolbar from './CanvasToolbar';
+import ProblemSolverCanvas from './ProblemSolverCanvas';
 import ImageLightbox from './ImageLightbox';
 import CharacterMascot from './CharacterMascot';
 
@@ -279,10 +278,19 @@ export default function HwangsoSolver({ queue, setQueue, index, setIndex, onGrad
             <>
               <button
                 type="button"
-                onClick={toggleLayout}
-                className="rounded-full border-2 border-rose-100 bg-white px-4 py-1.5 text-xs font-bold text-rose-500 shadow-sm hover:bg-rose-50"
+                onClick={() => setIsLightboxOpen(true)}
+                disabled={!imageUrl}
+                className="rounded-full border-2 border-rose-200 bg-white px-4 py-1.5 text-xs font-bold text-rose-500 shadow-sm hover:bg-rose-50 disabled:opacity-40"
               >
-                {horizontal ? '↔️ 옆으로 보기 (현재)' : '↕️ 위아래로 보기 (현재)'}
+                🔍 크게 보기
+              </button>
+              <button
+                type="button"
+                onClick={handleHint}
+                disabled={copyingHint || !imageUrl}
+                className="rounded-full border-2 border-sky-200 bg-white px-4 py-1.5 text-xs font-bold text-sky-500 shadow-sm hover:bg-sky-50 disabled:opacity-50"
+              >
+                🐶 마법 힌트 💡
               </button>
               <button
                 type="button"
@@ -314,105 +322,29 @@ export default function HwangsoSolver({ queue, setQueue, index, setIndex, onGrad
       </div>
 
       {isSolving ? (
-        <div
-          className={
-            horizontal
-              ? 'grid h-[calc(100vh-160px)] grid-cols-1 gap-4 lg:grid-cols-2'
-              : 'flex flex-col gap-4'
-          }
-        >
-          {/* 문제 이미지 패널 */}
-          <section
-            className={`relative flex min-w-0 flex-col overflow-hidden rounded-3xl border-4 border-dashed border-amber-200 bg-amber-50/40 p-3 shadow-lg shadow-amber-100/60 ${
-              horizontal ? '' : 'max-h-[42vh]'
-            }`}
-          >
-            <div className="z-10 mb-2 flex flex-wrap items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setImageFitMode((mode) => (mode === 'contain' ? 'width' : 'contain'))}
-                className="rounded-full border-2 border-amber-200 bg-white px-3 py-1.5 text-xs font-bold text-amber-700 shadow-sm hover:bg-amber-50"
-              >
-                {imageFitMode === 'contain' ? '📐 전체 보기' : '↔️ 너비 맞춤'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsLightboxOpen(true)}
-                disabled={!imageUrl}
-                className="rounded-full border-2 border-rose-200 bg-white px-3 py-1.5 text-xs font-bold text-rose-500 shadow-sm hover:bg-rose-50 disabled:opacity-40"
-              >
-                🔍 크게 보기
-              </button>
-              <button
-                type="button"
-                onClick={handleHint}
-                disabled={copyingHint || !imageUrl}
-                className="rounded-full border-2 border-sky-200 bg-white px-3 py-1.5 text-xs font-bold text-sky-500 shadow-sm hover:bg-sky-50 disabled:opacity-50"
-              >
-                🐶 마법 힌트 💡
-              </button>
-            </div>
-            <span className="pointer-events-none absolute left-3 top-3 select-none text-2xl">🐶</span>
-            <div
-              className={`min-h-0 flex-1 rounded-2xl ${
-                imageFitMode === 'width'
-                  ? 'overflow-y-auto'
-                  : 'flex items-center justify-center overflow-hidden'
-              }`}
-            >
-              {imageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={imageUrl}
-                  alt={problemLabel}
-                  onClick={() => setIsLightboxOpen(true)}
-                  className={
-                    imageFitMode === 'width'
-                      ? 'h-auto w-full cursor-zoom-in rounded-2xl border-4 border-white object-contain shadow-md'
-                      : 'max-h-full max-w-full cursor-zoom-in rounded-2xl border-4 border-white object-contain shadow-md'
-                  }
-                />
-              ) : (
-                <p className="text-amber-400">문제 이미지가 없습니다.</p>
-              )}
-            </div>
-          </section>
-
-          {/* 캔버스 패널 */}
-          <section className={`flex min-w-0 flex-col gap-3 ${horizontal ? '' : 'min-h-[420px]'}`}>
-            <CanvasToolbar
+        // 단일 통합 캔버스: 문제 이미지가 배경으로 깔리고 그 위에 바로 풀이를 쓴다.
+        <div className="flex h-[calc(100vh-150px)] flex-col gap-3">
+          <div className="relative min-h-0 flex-1">
+            <ProblemSolverCanvas
+              ref={canvasRef}
+              bgImage={imageUrl}
               color={penColor}
               tool={penTool}
               onColorChange={setPenColor}
               onToolChange={setPenTool}
+              onReset={handleResetCanvas}
+              onDrawEnd={setHasCanvasContent}
               disabled={submitting}
             />
-            <div className="relative min-h-[260px] flex-1">
-              <Canvas
-                ref={canvasRef}
-                color={penColor}
-                tool={penTool}
-                disabled={submitting}
-                onDrawEnd={setHasCanvasContent}
-              />
-              <button
-                type="button"
-                onClick={handleResetCanvas}
-                disabled={submitting}
-                className="absolute right-2 top-2 rounded-full border-2 border-rose-100 bg-white/90 px-3 py-1.5 text-xs font-bold text-stone-500 shadow-sm hover:bg-rose-50 disabled:opacity-40"
-              >
-                🗑️ 다시 풀기 (초기화)
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={goToNext}
-              disabled={submitting}
-              className="h-20 w-full shrink-0 rounded-3xl bg-gradient-to-r from-rose-400 to-amber-400 px-2 text-lg font-extrabold text-white shadow-lg shadow-rose-200 hover:from-rose-500 hover:to-amber-500 disabled:cursor-wait disabled:opacity-60 md:text-2xl"
-            >
-              {isLastInQueue ? '🎉 다 풀었어요! 채점 시작하기' : '다음 문제 ➡️'}
-            </button>
-          </section>
+          </div>
+          <button
+            type="button"
+            onClick={goToNext}
+            disabled={submitting}
+            className="h-16 w-full shrink-0 rounded-3xl bg-gradient-to-r from-rose-400 to-amber-400 px-2 text-lg font-extrabold text-white shadow-lg shadow-rose-200 hover:from-rose-500 hover:to-amber-500 disabled:cursor-wait disabled:opacity-60 md:text-xl"
+          >
+            {isLastInQueue ? '🎉 다 풀었어요! 채점 시작하기' : '다음 문제 ➡️'}
+          </button>
         </div>
       ) : (
         <div className="space-y-4">

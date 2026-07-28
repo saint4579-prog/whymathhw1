@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import Canvas from './Canvas';
-import CanvasToolbar from './CanvasToolbar';
+import ProblemSolverCanvas from './ProblemSolverCanvas';
 import ImageLightbox from './ImageLightbox';
 import { toViewableImageUrl } from '@/lib/api';
 import { buildHintResultMessage, prepareGeminiHint } from '@/lib/geminiPrompt';
@@ -260,17 +259,15 @@ export default function ProblemSolver({ queue, setQueue, index, setIndex, onGrad
     );
   }
 
-  const horizontal = layoutMode === 'horizontal';
-  const problemPanelStyle = horizontal ? { '--split-ratio': `${splitRatio}%` } : undefined;
-
   return (
-    <div className="mx-auto max-w-7xl">
+    <div className="mx-auto max-w-5xl">
       {!isSolving && (
         <div className="mb-3 rounded-2xl bg-sky-100 px-4 py-3 text-center text-sm font-extrabold text-sky-700">
           💯 채점 시간이에요! 멍멍이와 함께 확인해봐요
         </div>
       )}
 
+      {/* 상단 정보 + 우측 툴바 */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-semibold text-stone-500">
           {queueLabel && (
@@ -290,22 +287,33 @@ export default function ProblemSolver({ queue, setQueue, index, setIndex, onGrad
           )}
         </p>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={toggleLayoutMode}
-            className="rounded-full border-2 border-rose-100 bg-white px-4 py-1.5 text-xs font-bold text-rose-500 shadow-sm hover:bg-rose-50"
-          >
-            {horizontal ? '↔️ 옆으로 보기 (현재)' : '↕️ 위아래로 보기 (현재)'}
-          </button>
           {isSolving && (
-            <button
-              type="button"
-              onClick={handleStopAndGrade}
-              disabled={!canStopAndGrade || submitting}
-              className="rounded-full border-2 border-orange-200 bg-white px-4 py-1.5 text-xs font-bold text-orange-600 shadow-sm hover:bg-orange-50 disabled:opacity-40"
-            >
-              🛑 여기까지만 풀고 채점하기
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => setIsLightboxOpen(true)}
+                disabled={!viewableImageUrl}
+                className="rounded-full border-2 border-rose-200 bg-white px-4 py-1.5 text-xs font-bold text-rose-500 shadow-sm hover:bg-rose-50 disabled:opacity-40"
+              >
+                🔍 크게 보기
+              </button>
+              <button
+                type="button"
+                onClick={handleHint}
+                disabled={copyingHint}
+                className="rounded-full border-2 border-sky-200 bg-white px-4 py-1.5 text-xs font-bold text-sky-500 shadow-sm hover:bg-sky-50 disabled:opacity-50"
+              >
+                🐶 마법 힌트 💡
+              </button>
+              <button
+                type="button"
+                onClick={handleStopAndGrade}
+                disabled={!canStopAndGrade || submitting}
+                className="rounded-full border-2 border-orange-200 bg-white px-4 py-1.5 text-xs font-bold text-orange-600 shadow-sm hover:bg-orange-50 disabled:opacity-40"
+              >
+                🛑 여기까지만 풀고 채점하기
+              </button>
+            </>
           )}
           <button
             type="button"
@@ -326,163 +334,53 @@ export default function ProblemSolver({ queue, setQueue, index, setIndex, onGrad
         </div>
       </div>
 
-      <div
-        ref={splitContainerRef}
-        className={
-          horizontal
-            ? `flex h-[calc(100vh-140px)] flex-col gap-6 lg:flex-row lg:gap-0 ${
-                isDraggingSplitter ? 'select-none' : ''
-              }`
-            : 'flex flex-col gap-4 overflow-y-auto'
-        }
-      >
-        <section
-          className={`relative flex min-w-0 flex-col overflow-hidden rounded-3xl border-4 border-dashed border-amber-200 bg-amber-50/40 p-3 shadow-lg shadow-amber-100/60 ${
-            horizontal ? 'min-h-[320px] lg:h-full lg:basis-[var(--split-ratio)]' : 'max-h-[35vh]'
-          }`}
-          style={problemPanelStyle}
-        >
-          <div className="z-10 mb-2 flex flex-wrap items-center justify-end gap-2">
+      {/* 단일 통합 캔버스: 두 단계 모두 사용 (풀이=편집, 채점=읽기전용으로 문제 위 내 풀이 확인) */}
+      <div className="flex h-[calc(100vh-140px)] flex-col gap-3">
+        <div className="relative min-h-0 flex-1">
+          <ProblemSolverCanvas
+            ref={canvasRef}
+            bgImage={viewableImageUrl}
+            color={penColor}
+            tool={penTool}
+            onColorChange={setPenColor}
+            onToolChange={setPenTool}
+            onReset={handleResetCanvas}
+            onDrawEnd={setHasCanvasContent}
+            disabled={!isSolving || submitting}
+            showTools={isSolving}
+          />
+        </div>
+        <div className="min-h-16 shrink-0">
+          {isSolving ? (
             <button
               type="button"
-              onClick={() => setImageFitMode((mode) => (mode === 'contain' ? 'width' : 'contain'))}
-              className="rounded-full border-2 border-amber-200 bg-white px-3 py-1.5 text-xs font-bold text-amber-700 shadow-sm hover:bg-amber-50"
-            >
-              {imageFitMode === 'contain' ? '📐 전체 보기' : '↔️ 너비 맞춤'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsLightboxOpen(true)}
-              disabled={!viewableImageUrl}
-              className="rounded-full border-2 border-rose-200 bg-white px-3 py-1.5 text-xs font-bold text-rose-500 shadow-sm hover:bg-rose-50 disabled:opacity-40"
-            >
-              🔍 크게 보기
-            </button>
-            <button
-              type="button"
-              onClick={handleHint}
-              disabled={copyingHint}
-              className="rounded-full border-2 border-sky-200 bg-white px-3 py-1.5 text-xs font-bold text-sky-500 shadow-sm hover:bg-sky-50 disabled:opacity-50"
-            >
-              🐶 마법 힌트 💡
-            </button>
-          </div>
-          <span className="pointer-events-none absolute left-3 top-3 select-none text-2xl">🐶</span>
-          <div
-            className={`min-h-0 flex-1 rounded-2xl ${
-              imageFitMode === 'width'
-                ? 'overflow-y-auto'
-                : 'flex items-center justify-center overflow-hidden'
-            }`}
-          >
-            {viewableImageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={viewableImageUrl}
-                alt={problem.code}
-                onClick={() => setIsLightboxOpen(true)}
-                className={
-                  imageFitMode === 'width'
-                    ? 'h-auto w-full cursor-zoom-in rounded-2xl border-4 border-white object-contain shadow-md'
-                    : `max-w-full cursor-zoom-in rounded-2xl border-4 border-white object-contain shadow-md ${
-                        horizontal ? 'max-h-[70vh]' : 'max-h-full'
-                      }`
-                }
-              />
-            ) : (
-              <p className="py-16 text-center text-amber-400">이미지가 없습니다.</p>
-            )}
-          </div>
-        </section>
-
-        {horizontal && (
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="문제와 필기 영역 너비 조절"
-            aria-valuemin={20}
-            aria-valuemax={80}
-            aria-valuenow={Math.round(splitRatio)}
-            tabIndex={0}
-            className={`group hidden w-8 shrink-0 touch-none select-none items-center justify-center self-stretch lg:flex ${
-              isDraggingSplitter ? 'cursor-col-resize' : 'cursor-ew-resize'
-            }`}
-            onPointerDown={handleSplitterPointerDown}
-            onPointerMove={handleSplitterPointerMove}
-            onPointerUp={finishSplitterDrag}
-            onPointerCancel={finishSplitterDrag}
-          >
-            <div className="flex h-full w-2 items-center justify-center rounded-full bg-amber-200 transition-colors group-hover:bg-rose-300">
-              <span className="rounded-full bg-white px-1 py-2 text-sm shadow-md">🐾</span>
-            </div>
-          </div>
-        )}
-
-        <section
-          className={`flex min-w-0 flex-1 flex-col gap-3 ${
-            horizontal ? 'min-h-[430px] lg:h-full' : 'min-h-[350px]'
-          }`}
-        >
-          {isSolving && (
-            <CanvasToolbar
-              color={penColor}
-              tool={penTool}
-              onColorChange={setPenColor}
-              onToolChange={setPenTool}
+              onClick={goToNext}
               disabled={submitting}
-            />
+              className="h-16 w-full rounded-3xl bg-gradient-to-r from-rose-400 to-amber-400 px-2 text-lg font-extrabold text-white shadow-lg shadow-rose-200 hover:from-rose-500 hover:to-amber-500 disabled:cursor-wait disabled:opacity-60 md:text-xl"
+            >
+              {isLastInQueue ? '🎉 다 풀었어요! 채점 시작하기' : '다음 문제 ➡️'}
+            </button>
+          ) : (
+            <div className="grid h-16 grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => handleGrade('O')}
+                disabled={submitting}
+                className="rounded-3xl bg-rose-400 px-2 text-lg font-extrabold text-white shadow-lg shadow-rose-200 hover:bg-rose-500 disabled:cursor-wait disabled:opacity-60 md:text-xl"
+              >
+                {submitting ? '🐾 보관 중이에요...' : '최고예요! 🐶 (O)'}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleGrade('X')}
+                disabled={submitting}
+                className="rounded-3xl bg-orange-400 px-2 text-lg font-extrabold text-white shadow-lg shadow-amber-200 hover:bg-orange-500 disabled:cursor-wait disabled:opacity-60 md:text-xl"
+              >
+                {submitting ? '🐾 보관 중이에요...' : '다시 도전! 🦴 (X)'}
+              </button>
+            </div>
           )}
-          <div className="relative min-h-[260px] flex-1">
-            <Canvas
-              ref={canvasRef}
-              color={penColor}
-              tool={penTool}
-              disabled={!isSolving || isDraggingSplitter || submitting}
-              onDrawEnd={setHasCanvasContent}
-            />
-            {isSolving && (
-              <button
-                type="button"
-                onClick={handleResetCanvas}
-                disabled={submitting}
-                className="absolute right-2 top-2 rounded-full border-2 border-rose-100 bg-white/90 px-3 py-1.5 text-xs font-bold text-stone-500 shadow-sm hover:bg-rose-50 disabled:opacity-40"
-              >
-                🗑️ 다시 풀기 (초기화)
-              </button>
-            )}
-          </div>
-          <div className="min-h-24 shrink-0">
-            {isSolving ? (
-              <button
-                type="button"
-                onClick={goToNext}
-                disabled={submitting}
-                className="h-full w-full rounded-3xl bg-gradient-to-r from-rose-400 to-amber-400 px-2 text-lg font-extrabold text-white shadow-lg shadow-rose-200 hover:from-rose-500 hover:to-amber-500 disabled:cursor-wait disabled:opacity-60 md:text-2xl"
-              >
-                {isLastInQueue ? '🎉 다 풀었어요! 채점 시작하기' : '다음 문제 ➡️'}
-              </button>
-            ) : (
-              <div className="grid h-full grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => handleGrade('O')}
-                  disabled={submitting}
-                  className="rounded-3xl bg-rose-400 px-2 text-lg font-extrabold text-white shadow-lg shadow-rose-200 hover:bg-rose-500 disabled:cursor-wait disabled:opacity-60 md:text-2xl"
-                >
-                  {submitting ? '🐾 멍멍이가 드라이브에 풀이를 보관 중이에요...' : '최고예요! 🐶 (O)'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleGrade('X')}
-                  disabled={submitting}
-                  className="rounded-3xl bg-orange-400 px-2 text-lg font-extrabold text-white shadow-lg shadow-amber-200 hover:bg-orange-500 disabled:cursor-wait disabled:opacity-60 md:text-2xl"
-                >
-                  {submitting ? '🐾 멍멍이가 드라이브에 풀이를 보관 중이에요...' : '다시 도전! 🦴 (X)'}
-                </button>
-              </div>
-            )}
-          </div>
-        </section>
+        </div>
       </div>
 
       {isLightboxOpen && viewableImageUrl && (

@@ -11,7 +11,15 @@ const ERASER_WIDTH = 24;
 const isDrawingPointer = (event) => event.pointerType === 'pen' || event.pointerType === 'mouse';
 
 const Canvas = forwardRef(function Canvas(
-  { disabled = false, onDrawEnd, color = '#1e293b', tool = 'pen', bgImage = null, bgOpacity = 0.55 },
+  {
+    disabled = false,
+    onDrawEnd,
+    color = '#1e293b',
+    tool = 'pen',
+    bgImage = null,
+    bgOpacity = 0.55,
+    bgPosition = 'center', // 'center' | 'top' — 배경 문제 이미지 정렬
+  },
   ref
 ) {
   const containerRef = useRef(null);
@@ -220,7 +228,9 @@ const Canvas = forwardRef(function Canvas(
           alt=""
           aria-hidden="true"
           draggable={false}
-          className="pointer-events-none absolute inset-0 h-full w-full select-none object-contain"
+          className={`pointer-events-none absolute inset-0 h-full w-full select-none object-contain ${
+            bgPosition === 'top' ? 'object-top' : 'object-center'
+          }`}
           style={{ opacity: bgOpacity }}
         />
       )}
