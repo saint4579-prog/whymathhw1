@@ -315,12 +315,20 @@ export function buildTasksForDate(goals = [], dateKey) {
  * 아침 7시부터 아이가 정한 종료 시각까지, slotMinutes 단위의 빈칸을 만든다.
  * @returns [{ index, startMinutes, endMinutes, label }]
  */
-export function buildTimeSlots(endHour = DEFAULT_END_HOUR, slotMinutes = DEFAULT_SLOT_MINUTES) {
+export function buildTimeSlots(
+  startHour = TIMETABLE_START_HOUR,
+  endHour = DEFAULT_END_HOUR,
+  slotMinutes = DEFAULT_SLOT_MINUTES
+) {
   const step = SLOT_MINUTE_OPTIONS.includes(Number(slotMinutes))
     ? Number(slotMinutes)
     : DEFAULT_SLOT_MINUTES;
-  const end = Math.min(TIMETABLE_MAX_HOUR, Math.max(TIMETABLE_START_HOUR + 1, Number(endHour) || DEFAULT_END_HOUR));
-  const startMin = TIMETABLE_START_HOUR * 60;
+  const rawStart = Number(startHour);
+  const start = Number.isFinite(rawStart)
+    ? Math.min(TIMETABLE_MAX_HOUR - 1, Math.max(0, rawStart))
+    : TIMETABLE_START_HOUR;
+  const end = Math.min(TIMETABLE_MAX_HOUR, Math.max(start + 1, Number(endHour) || DEFAULT_END_HOUR));
+  const startMin = start * 60;
   const endMin = end * 60;
   const slots = [];
   for (let m = startMin, index = 0; m < endMin; m += step, index += 1) {
@@ -438,14 +446,30 @@ export function calcDayStats(tasks = []) {
   };
 }
 
+// 30분짜리 계획 1칸을 완료할 때마다 주는 포인트.
+export const POINTS_PER_SLOT = 30;
+
+// 할 일 하나가 몇 개의 30분 칸에 해당하는지. (예상 시간 기준, 최소 1칸)
+export function taskSlotCount(task) {
+  const minutes = Math.max(1, Number(task?.minutes) || DEFAULT_TASK_MINUTES);
+  return Math.max(1, Math.round(minutes / 30));
+}
+
 /**
- * 달성률 기반 포인트. 하루 목표를 전부 끝내면 MAX_DAILY_PLANNER_POINTS(100P).
- * 계획을 몇 개 세웠는지와 무관하게 "오늘 정한 걸 얼마나 해냈나"만 본다.
+ * 30분 단위 포인트. "계획(할 일)을 완료할 때마다 30분당 30P".
+ * 예) 30분짜리 할 일 완료 → 30P, 60분짜리 완료 → 60P.
+ * 완료한(done) 할 일만 계산한다.
  */
-export function calcPlannerPoints(tasks = [], maxPoints = MAX_DAILY_PLANNER_POINTS) {
-  const { achievementRate, plannedTotal } = calcDayStats(tasks);
-  if (plannedTotal === 0) return 0;
-  return Math.round(achievementRate * maxPoints);
+export function calcPlannerPoints(tasks = []) {
+  return tasks.reduce(
+    (sum, t) => sum + (t.done ? taskSlotCount(t) * POINTS_PER_SLOT : 0),
+    0
+  );
+}
+
+/** 오늘 계획을 전부 완료했을 때 받을 수 있는 최대 포인트. (예상 포인트 표시용) */
+export function calcPlannerMaxPoints(tasks = []) {
+  return tasks.reduce((sum, t) => sum + taskSlotCount(t) * POINTS_PER_SLOT, 0);
 }
 
 /**
@@ -474,8 +498,9 @@ export function createEmptyDayPlan(dateKey = toDateKey()) {
   return {
     date: dateKey,
     slotMinutes: DEFAULT_SLOT_MINUTES,
+    startHour: TIMETABLE_START_HOUR,
     endHour: DEFAULT_END_HOUR,
-    setupDone: false, // 단위/종료시각을 아직 고르지 않은 상태
+    setupDone: false, // 시작·종료시각을 아직 고르지 않은 상태
     tasks: [],
     assignments: {}, // { [slotIndex]: taskId }
     pointsAwarded: 0,

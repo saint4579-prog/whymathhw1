@@ -19,7 +19,7 @@ import {
   DEFAULT_END_HOUR,
   DEFAULT_SLOT_MINUTES,
   MISS_STRATEGY,
-  MAX_DAILY_PLANNER_POINTS,
+  calcPlannerMaxPoints,
   toDateKey,
   addDays,
   weekdayLabel,
@@ -397,8 +397,8 @@ export default function StudyPlanner({ userName, onPointsAwarded, examConfig, co
 
   // ---- 파생값 -----------------------------------------------------------
   const slots = useMemo(
-    () => buildTimeSlots(day.endHour, day.slotMinutes),
-    [day.endHour, day.slotMinutes]
+    () => buildTimeSlots(day.startHour, day.endHour, day.slotMinutes),
+    [day.startHour, day.endHour, day.slotMinutes]
   );
   const stats = useMemo(() => calcDayStats(day.tasks), [day.tasks]);
   const tasksById = useMemo(
@@ -724,7 +724,7 @@ export default function StudyPlanner({ userName, onPointsAwarded, examConfig, co
             <StatBox emoji="✏️" label="푼 문제" value={`${stats.doneProblems} / ${stats.plannedProblems}문제`} tone="sky" />
             <StatBox emoji="✅" label="끝낸 할 일" value={`${stats.doneCount} / ${stats.taskCount}개`} tone="emerald" />
             <StatBox emoji="⏱️" label="계획한 시간" value={`${Math.round(stats.totalMinutes / 60 * 10) / 10}시간`} tone="violet" />
-            <StatBox emoji="💰" label="예상 포인트" value={`${calcPlannerPoints(day.tasks)}P / ${MAX_DAILY_PLANNER_POINTS}P`} tone="amber" />
+            <StatBox emoji="💰" label="예상 포인트 (30분당 30P)" value={`${calcPlannerPoints(day.tasks)}P / ${calcPlannerMaxPoints(day.tasks)}P`} tone="amber" />
             <div className="col-span-2 flex items-center justify-center rounded-2xl bg-gradient-to-r from-rose-50 to-amber-50 p-3 text-center text-sm font-bold text-rose-500 sm:col-span-1">
               {cheerMessage(stats.achievementRate)}
             </div>
@@ -882,9 +882,17 @@ export default function StudyPlanner({ userName, onPointsAwarded, examConfig, co
           {!day.setupDone ? (
             <TimetableSetup
               slotMinutes={day.slotMinutes}
+              startHour={day.startHour}
               endHour={day.endHour}
-              onConfirm={(slotMinutes, endHour) =>
-                setDay((prev) => ({ ...prev, slotMinutes, endHour, setupDone: true, assignments: {} }))
+              onConfirm={(slotMinutes, startHour, endHour) =>
+                setDay((prev) => ({
+                  ...prev,
+                  slotMinutes,
+                  startHour,
+                  endHour,
+                  setupDone: true,
+                  assignments: {},
+                }))
               }
             />
           ) : (
@@ -1250,9 +1258,33 @@ function GoalCard({ goal, todayKey, onRemove, onToggleHoliday, onToggleRestWeekd
   );
 }
 
-function TimetableSetup({ slotMinutes, endHour, onConfirm }) {
+// 시간(24시각)을 사람이 읽는 라벨로. 7 -> 아침 7시, 13 -> 오후 1시, 24 -> 밤 12시
+function hourLabel(h) {
+  if (h === 24) return '밤 12시';
+  if (h < 12) return `아침 ${h}시`;
+  if (h === 12) return '낮 12시';
+  return `오후 ${h - 12}시`;
+}
+
+function TimetableSetup({ slotMinutes, startHour, endHour, onConfirm }) {
   const [minutes, setMinutes] = useState(slotMinutes || DEFAULT_SLOT_MINUTES);
-  const [hour, setHour] = useState(endHour || DEFAULT_END_HOUR);
+  const [start, setStart] = useState(startHour ?? TIMETABLE_START_HOUR);
+  const [end, setEnd] = useState(endHour || DEFAULT_END_HOUR);
+
+  // 선택 가능한 시작 시각(오전 6시 ~ 밤 11시)과, 시작 이후의 끝 시각.
+  const startOptions = Array.from(
+    { length: TIMETABLE_MAX_HOUR - 1 - 6 + 1 },
+    (_, i) => 6 + i
+  );
+  const endOptions = Array.from(
+    { length: TIMETABLE_MAX_HOUR - start },
+    (_, i) => start + 1 + i
+  );
+
+  const chooseStart = (h) => {
+    setStart(h);
+    if (end <= h) setEnd(Math.min(TIMETABLE_MAX_HOUR, h + 1)); // 끝이 시작보다 앞서지 않게 보정
+  };
 
   return (
     <div className="space-y-5 rounded-2xl bg-amber-50 p-5">
@@ -1270,29 +1302,47 @@ function TimetableSetup({ slotMinutes, endHour, onConfirm }) {
       </div>
       <div>
         <p className="mb-2 text-sm font-extrabold text-stone-700">
-          2️⃣ 오늘 몇 시까지 계획을 세울래요?
+          2️⃣ 몇 시부터 몇 시까지 계획을 세울래요?
         </p>
-        <div className="flex flex-wrap gap-2">
-          {Array.from({ length: TIMETABLE_MAX_HOUR - TIMETABLE_START_HOUR }, (_, i) => TIMETABLE_START_HOUR + 1 + i).map(
-            (option) => (
-              <PillButton
-                key={option}
-                active={hour === option}
-                onClick={() => setHour(option)}
-                className="px-3 py-1.5 text-xs"
-              >
-                {option === 24 ? '밤 12시' : `${option}시`}
-              </PillButton>
-            )
-          )}
+        <div className="space-y-3">
+          <div>
+            <p className="mb-1 text-xs font-extrabold text-stone-500">시작 시간</p>
+            <div className="flex flex-wrap gap-2">
+              {startOptions.map((option) => (
+                <PillButton
+                  key={option}
+                  active={start === option}
+                  onClick={() => chooseStart(option)}
+                  className="px-3 py-1.5 text-xs"
+                >
+                  {hourLabel(option)}
+                </PillButton>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="mb-1 text-xs font-extrabold text-stone-500">끝 시간</p>
+            <div className="flex flex-wrap gap-2">
+              {endOptions.map((option) => (
+                <PillButton
+                  key={option}
+                  active={end === option}
+                  onClick={() => setEnd(option)}
+                  className="px-3 py-1.5 text-xs"
+                >
+                  {hourLabel(option)}
+                </PillButton>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
       <button
         type="button"
-        onClick={() => onConfirm(minutes, hour)}
+        onClick={() => onConfirm(minutes, start, end)}
         className="w-full rounded-full bg-rose-400 px-5 py-3 font-extrabold text-white shadow-md hover:bg-rose-500"
       >
-        🐶 시간표 만들기 (아침 7시 ~ {hour === 24 ? '밤 12시' : `${hour}시`})
+        🐶 시간표 만들기 ({hourLabel(start)} ~ {hourLabel(end)})
       </button>
     </div>
   );
