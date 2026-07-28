@@ -3,7 +3,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import CharacterMascot from './CharacterMascot';
 import { toDateKey, addDays, buildTasksForDate } from '@/lib/planner';
-import { generateSmartSchedule, daysUntil, formatDday } from '@/lib/smartSchedule';
+import {
+  generateSmartSchedule,
+  daysUntil,
+  formatDday,
+  normalizeExams,
+  pickPrimaryExam,
+  examToConfig,
+} from '@/lib/smartSchedule';
 import {
   subjectsOn,
   allAcademySubjects,
@@ -51,6 +58,38 @@ function DdayBadge({ dueDate }) {
   );
 }
 
+// 알림장/메모 열기 버튼. 메모가 있으면 진한 색으로 강조한다.
+function MemoButton({ hasMemo, open, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={open}
+      title="알림장/메모"
+      className={`shrink-0 rounded-full px-2.5 py-1 text-sm shadow-sm transition ${
+        hasMemo ? 'bg-amber-300 text-amber-900' : 'bg-stone-100 text-stone-400 hover:bg-amber-100'
+      }`}
+    >
+      💬
+    </button>
+  );
+}
+
+// 아래로 펼쳐지는 긴 메모(알림장) 편집 패널. flex-wrap 안에서 w-full로 다음 줄에 놓인다.
+function MemoPanel({ value, onChange }) {
+  return (
+    <div className="mt-2 w-full">
+      <textarea
+        value={value || ''}
+        onChange={(e) => onChange(e.target.value)}
+        rows={4}
+        placeholder="학원 알림장(카톡/문자) 내용을 붙여넣거나 메모하세요..."
+        className="w-full rounded-2xl border-2 border-amber-100 bg-amber-50/40 p-3 text-sm font-semibold text-stone-700 outline-none focus:border-rose-300"
+      />
+    </div>
+  );
+}
+
 const uid = () => `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
 // [오늘 할 일] 탭 — 세 출처(학원 숙제 · 기간 목표 · 어제 이월)를 하나로 통합해서 보여준다.
@@ -65,6 +104,7 @@ export default function TodayTodo({ userName, examConfig, completedProblems = 0 
   const [hwSubject, setHwSubject] = useState('');
   const [hwTitle, setHwTitle] = useState('');
   const [dismissed, setDismissed] = useState(false);
+  const [openMemoKey, setOpenMemoKey] = useState(null); // 열려 있는 메모(알림장) 아코디언 키
 
   // ---- 로딩: GAS(플래너 블롭)에서 goals/days/examConfig/academyHomework 를 한 번에 불러온다 ----
   useEffect(() => {
@@ -124,7 +164,11 @@ export default function TodayTodo({ userName, examConfig, completedProblems = 0 
   );
   const academyHomework = blob?.academyHomework || [];
   const goals = blob?.goals || [];
-  const effectiveExam = blob?.examConfig || examConfig;
+  // 여러 시험 중 가장 임박한 시험을 스마트 시간표에 쓴다. (블롭 우선, 없으면 상위에서 내려준 examConfig)
+  const effectiveExam = useMemo(() => {
+    const primary = pickPrimaryExam(normalizeExams(blob?.exams ?? blob?.examConfig), today);
+    return primary ? examToConfig(primary) : examConfig;
+  }, [blob, examConfig, today]);
 
   const goalTasksToday = useMemo(() => buildTasksForDate(goals, today), [goals, today]);
   const academyDueToday = useMemo(
@@ -169,13 +213,20 @@ export default function TodayTodo({ userName, examConfig, completedProblems = 0 
     const dueDate = getNextAcademyDate(hwSubject, today);
     setAcademy((list) => [
       ...list,
-      { id: uid(), subject: hwSubject, title, assignedDate: today, dueDate, done: false },
+      { id: uid(), subject: hwSubject, title, assignedDate: today, dueDate, done: false, memo: '' },
     ]);
     setHwTitle('');
   };
   const toggleAcademyHw = (id) =>
     setAcademy((list) => list.map((h) => (h.id === id ? { ...h, done: !h.done } : h)));
   const removeAcademyHw = (id) => setAcademy((list) => list.filter((h) => h.id !== id));
+
+  // 긴 메모(알림장) 편집: 학원 숙제 / 오늘 할 일 각각에 저장한다.
+  const setAcademyMemo = (id, memo) =>
+    setAcademy((list) => list.map((h) => (h.id === id ? { ...h, memo } : h)));
+  const setTodoMemo = (id, memo) =>
+    setTodayTodos((list) => list.map((t) => (t.id === id ? { ...t, memo } : t)));
+  const toggleMemo = (key) => setOpenMemoKey((k) => (k === key ? null : key));
 
   const doneCount = todayTodos.filter((t) => t.done).length;
   const todaySubjects = subjectsOn(today);
@@ -400,10 +451,22 @@ export default function TodayTodo({ userName, examConfig, completedProblems = 0 
                       {h.title}
                     </span>
                     {!h.done && <DdayBadge dueDate={h.dueDate} />}
+                    <MemoButton
+                      hasMemo={Boolean(h.memo)}
+                      open={openMemoKey === `aca-${h.id}`}
+                      onClick={() => toggleMemo(`aca-${h.id}`)}
+                    />
                     {!h.done && !inToday && (
                       <button
                         type="button"
-                        onClick={() => addTodo({ text: `[${h.subject}] ${h.title}`, type: 'academy', sourceId: `aca-${h.id}` })}
+                        onClick={() =>
+                          addTodo({
+                            text: `[${h.subject}] ${h.title}`,
+                            type: 'academy',
+                            sourceId: `aca-${h.id}`,
+                            memo: h.memo || '',
+                          })
+                        }
                         className="shrink-0 rounded-full bg-violet-400 px-3 py-1 text-[11px] font-bold text-white shadow-sm hover:bg-violet-500"
                       >
                         ＋ 오늘로
@@ -417,6 +480,9 @@ export default function TodayTodo({ userName, examConfig, completedProblems = 0 
                     >
                       삭제
                     </button>
+                    {openMemoKey === `aca-${h.id}` && (
+                      <MemoPanel value={h.memo} onChange={(v) => setAcademyMemo(h.id, v)} />
+                    )}
                   </li>
                 );
               })}
@@ -487,7 +553,7 @@ export default function TodayTodo({ userName, examConfig, completedProblems = 0 
             {todayTodos.map((todo) => (
               <li
                 key={todo.id}
-                className={`flex items-center gap-3 rounded-2xl border-2 p-3 transition ${
+                className={`flex flex-wrap items-center gap-3 rounded-2xl border-2 p-3 transition ${
                   todo.done ? 'border-emerald-200 bg-emerald-50' : 'border-amber-100 bg-white'
                 }`}
               >
@@ -505,6 +571,11 @@ export default function TodayTodo({ userName, examConfig, completedProblems = 0 
                 <span className={`min-w-0 flex-1 text-sm font-bold ${todo.done ? 'text-emerald-600 line-through' : 'text-stone-700'}`}>
                   {todo.text}
                 </span>
+                <MemoButton
+                  hasMemo={Boolean(todo.memo)}
+                  open={openMemoKey === `todo-${todo.id}`}
+                  onClick={() => toggleMemo(`todo-${todo.id}`)}
+                />
                 <button
                   type="button"
                   onClick={() => removeTodo(todo.id)}
@@ -512,6 +583,9 @@ export default function TodayTodo({ userName, examConfig, completedProblems = 0 
                 >
                   삭제
                 </button>
+                {openMemoKey === `todo-${todo.id}` && (
+                  <MemoPanel value={todo.memo} onChange={(v) => setTodoMemo(todo.id, v)} />
+                )}
               </li>
             ))}
           </ul>

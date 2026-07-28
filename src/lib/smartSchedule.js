@@ -175,3 +175,81 @@ export function saveExamConfig(userName, config) {
     // 저장소가 막힌 환경에서도 화면 상태는 유지된다.
   }
 }
+
+// ---------------------------------------------------------------------------
+// 다중 시험 등록 (여러 개의 시험을 배열로 관리)
+// 시험 하나 = { id, name, examDate, totalProblems }
+// 저장은 플래너 블롭(exams)에 하고, localStorage(smart-exams)는 빠른 표시용 캐시.
+// 기존 소비자(스터디 플래너/오늘 할 일)에는 pickPrimaryExam→examToConfig로 "가장 임박한 시험 1개"만 넘긴다.
+// ---------------------------------------------------------------------------
+
+const EXAMS_KEY_PREFIX = 'smart-exams';
+
+function examsKey(userName) {
+  return `${EXAMS_KEY_PREFIX}:${userName || 'guest'}`;
+}
+
+export function makeExam(partial = {}) {
+  return {
+    id: partial.id ?? `exam-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    name: partial.name ?? '',
+    examDate: partial.examDate ?? '',
+    totalProblems: Math.max(0, Math.round(Number(partial.totalProblems) || 0)),
+  };
+}
+
+// 서버/캐시에서 온 값이 배열이 아니거나, 구버전 단일 examConfig여도 안전하게 배열로 정규화한다.
+export function normalizeExams(raw) {
+  if (Array.isArray(raw)) return raw.filter(Boolean).map(makeExam);
+  if (raw && typeof raw === 'object' && raw.examDate) {
+    return [makeExam({ name: raw.scopeLabel || '시험', examDate: raw.examDate, totalProblems: raw.totalProblems })];
+  }
+  return [];
+}
+
+export function loadExams(userName) {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(examsKey(userName));
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) return arr.map(makeExam);
+    }
+  } catch {
+    // 무시하고 마이그레이션 시도
+  }
+  // 구버전 단일 시험 설정 → 배열로 마이그레이션
+  const legacy = loadExamConfig(userName);
+  if (legacy && legacy.examDate && Number(legacy.totalProblems) > 0) {
+    return [makeExam({ name: legacy.scopeLabel || '시험', examDate: legacy.examDate, totalProblems: legacy.totalProblems })];
+  }
+  return [];
+}
+
+export function saveExams(userName, exams) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(examsKey(userName), JSON.stringify(Array.isArray(exams) ? exams : []));
+  } catch {
+    // 저장 실패는 무시 (블롭/GAS 저장이 별도로 이뤄짐)
+  }
+}
+
+// 여러 시험 중 "가장 임박한(오늘 이후 가장 가까운)" 시험을 고른다. 다 지났으면 가장 최근 것.
+export function pickPrimaryExam(exams, today = toDateKey()) {
+  const list = (exams || []).filter((e) => e && e.examDate);
+  if (list.length === 0) return null;
+  const upcoming = list.filter((e) => e.examDate >= today).sort((a, b) => a.examDate.localeCompare(b.examDate));
+  if (upcoming.length > 0) return upcoming[0];
+  return [...list].sort((a, b) => b.examDate.localeCompare(a.examDate))[0];
+}
+
+// 시험 1개 → 기존 로직이 쓰는 examConfig 형태({ examDate, totalProblems, scopeLabel })로 변환.
+export function examToConfig(exam) {
+  if (!exam) return defaultExamConfig();
+  return {
+    examDate: exam.examDate || '',
+    totalProblems: exam.totalProblems || 0,
+    scopeLabel: exam.name || '시험 범위',
+  };
+}

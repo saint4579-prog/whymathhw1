@@ -18,7 +18,7 @@ import UserRegistration from '@/components/UserRegistration';
 import CharacterMascot from '@/components/CharacterMascot';
 import { fetchProblems, redeemPoints, registerUser, submitGrade, fetchPlanner, patchPlanner } from '@/lib/api';
 import { fetchHwangsoProblems, loadHwangsoRecords, appendHwangsoRecord } from '@/lib/hwangso';
-import { loadExamConfig, saveExamConfig, defaultExamConfig } from '@/lib/smartSchedule';
+import { loadExams, saveExams, normalizeExams, pickPrimaryExam, examToConfig } from '@/lib/smartSchedule';
 import { toISODate } from '@/lib/dateUtils';
 import { getPointsForAnswer } from '@/lib/points';
 import { getCollectionState } from '@/lib/levels';
@@ -111,8 +111,8 @@ export default function Home() {
   const [mockExamProblems, setMockExamProblems] = useState([]);
   // [황소 중2상 1차단평대비] 문제집. public/data/문항목록.csv 를 프론트에서 직접 파싱해 채운다.
   const [hwangsoProblems, setHwangsoProblems] = useState([]);
-  // 스마트 추천 시간표용 시험 설정(D-day/범위). 월간·스터디·오늘 할 일 탭이 공유한다.
-  const [examConfig, setExamConfig] = useState(defaultExamConfig);
+  // 여러 개의 시험 대비 설정(배열). 월간 플래너에서 추가/수정/삭제하고, 달력에 표시된다.
+  const [exams, setExams] = useState([]);
   // 시험 설정을 GAS(구글 시트)에서 불러오는 중인지 여부. (월간 플래너 로딩 표시용)
   const [examConfigLoading, setExamConfigLoading] = useState(true);
   // 전체 현황판에서 어느 문제집 탭이 선택되어 있는지 ('yi' | 'mockExam')
@@ -160,6 +160,10 @@ export default function Home() {
     () => [...problems, ...hwangsoProblems],
     [problems, hwangsoProblems]
   );
+
+  // 여러 시험 중 "가장 임박한 시험 1개"를 기존 examConfig 형태로 파생한다.
+  // (스터디 플래너 추천 목표 / 오늘 할 일 스마트 시간표는 기존처럼 이 값 하나만 사용)
+  const examConfig = useMemo(() => examToConfig(pickPrimaryExam(exams)), [exams]);
 
   // 누적 포인트가 늘어 레벨이 오르면 축하 모달을 띄운다.
   // 최초 로딩 시점 레벨은 기준선으로 저장만 하고(모달 없이), 이후 상승분에만 반응한다.
@@ -288,20 +292,23 @@ export default function Home() {
     };
   }, [userInfo]);
 
-  // 시험 설정(D-day/범위)을 불러온다.
-  // 1) 즉시 localStorage 캐시로 화면을 채우고, 2) GAS(구글 시트)에서 최신값을 받아 덮어쓴다.
+  // 시험 목록(배열)을 불러온다.
+  // 1) 즉시 localStorage 캐시로 화면을 채우고, 2) GAS(플래너 블롭)에서 최신값을 받아 덮어쓴다.
+  //    구버전 단일 examConfig 블롭도 normalizeExams로 배열로 자동 마이그레이션한다.
   useEffect(() => {
     if (!userInfo) return undefined;
     let cancelled = false;
     setExamConfigLoading(true);
-    // 빠른 표시: 로컬 캐시 먼저
-    setExamConfig(loadExamConfig(userInfo?.name));
+    setExams(loadExams(userInfo?.name)); // 빠른 표시: 로컬 캐시 먼저
     (async () => {
       try {
         const { planner } = await fetchPlanner(userInfo?.name);
-        if (!cancelled && planner?.examConfig) {
-          setExamConfig(planner.examConfig);
-          saveExamConfig(userInfo?.name, planner.examConfig); // 로컬 캐시 동기화
+        if (!cancelled && planner) {
+          const remoteExams = normalizeExams(planner.exams ?? planner.examConfig);
+          if (remoteExams.length > 0) {
+            setExams(remoteExams);
+            saveExams(userInfo?.name, remoteExams); // 로컬 캐시 동기화
+          }
         }
       } catch {
         // GAS 미연동/실패 시 로컬 캐시값을 그대로 사용한다.
@@ -314,12 +321,13 @@ export default function Home() {
     };
   }, [userInfo]);
 
-  // 월간 플래너에서 시험 설정을 바꾸면 즉시 화면/캐시에 반영하고 GAS에도 영구 저장한다.
-  const handleExamConfigChange = useCallback(
-    (next) => {
-      setExamConfig(next);
-      saveExamConfig(userInfo?.name, next); // 로컬 캐시(즉시)
-      patchPlanner(userInfo?.name, { examConfig: next }); // GAS 영구 저장(비동기, 실패 시 캐시 유지)
+  // 월간 플래너에서 시험을 추가/수정/삭제하면 즉시 화면/캐시에 반영하고 GAS에도 영구 저장한다.
+  const handleExamsChange = useCallback(
+    (nextExams) => {
+      const list = Array.isArray(nextExams) ? nextExams : [];
+      setExams(list);
+      saveExams(userInfo?.name, list); // 로컬 캐시(즉시)
+      patchPlanner(userInfo?.name, { exams: list }); // GAS 영구 저장(비동기, 실패 시 캐시 유지)
     },
     [userInfo]
   );
@@ -760,8 +768,8 @@ export default function Home() {
         {!loading && !error && activeTab === 'planner' && (
           <MonthlyPlanner
             dailyStats={dailyStats}
-            examConfig={examConfig}
-            onExamConfigChange={handleExamConfigChange}
+            exams={exams}
+            onExamsChange={handleExamsChange}
             examConfigLoading={examConfigLoading}
           />
         )}
