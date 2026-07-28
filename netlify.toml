@@ -1,0 +1,13 @@
+# Netlify 배포 설정 (Next.js)
+# Netlify가 Next.js를 감지하면 @netlify/plugin-nextjs 런타임으로 SSR/이미지/라우팅을 처리한다.
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  # Next 14.2 는 Node 18.17+ 필요. 안정적으로 20으로 고정한다.
+  NODE_VERSION = "20"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
