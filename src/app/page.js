@@ -16,12 +16,15 @@ import CharacterCollection from '@/components/CharacterCollection';
 import LevelUpModal from '@/components/LevelUpModal';
 import UserRegistration from '@/components/UserRegistration';
 import CharacterMascot from '@/components/CharacterMascot';
+import Village from '@/components/Village';
 import { fetchProblems, redeemPoints, registerUser, submitGrade, fetchPlanner, patchPlanner } from '@/lib/api';
 import { fetchHwangsoProblems, loadHwangsoRecords, appendHwangsoRecord } from '@/lib/hwangso';
 import { loadExams, saveExams, normalizeExams, pickPrimaryExam, examToConfig } from '@/lib/smartSchedule';
 import { toISODate } from '@/lib/dateUtils';
 import { getPointsForAnswer } from '@/lib/points';
 import { getCollectionState } from '@/lib/levels';
+import { CHARACTERS } from '@/lib/characters';
+import { VILLAGE_ICON, clampLevel, MAX_HOUSE_LEVEL } from '@/lib/villageAssets';
 import { sortProblemsByPage, isSolved } from '@/lib/problemUtils';
 import { recordAttempt } from '@/lib/reviewSchedule';
 
@@ -144,6 +147,11 @@ export default function Home() {
   // 레벨업 축하 모달로 보여줄, 이번에 새로 얻은 캐릭터 정보. null이면 표시 안 함.
   const [levelUp, setLevelUp] = useState(null);
 
+  // [멍멍 마을] 열림 여부와 집 단계.
+  // 집 단계는 플래너 블롭에 함께 저장해 기기를 바꿔도 유지된다.
+  const [villageOpen, setVillageOpen] = useState(false);
+  const [houseLevel, setHouseLevel] = useState(1);
+
   // 그동안 모은(누적) 포인트 = 날짜별 학습 통계(dailyStats)의 pointsEarned 총합.
   // 현재 잔액이 아니라 누적값이라, 선물로 포인트를 차감해도 레벨/캐릭터는 줄지 않는다.
   const totalEarnedPoints = useMemo(
@@ -157,6 +165,16 @@ export default function Home() {
   const collection = useMemo(
     () => getCollectionState(totalEarnedPoints),
     [totalEarnedPoints]
+  );
+
+  // 마을에 내보낼 캐릭터: 지금까지 해금한 아이들의 '한글 이름'
+  const villageCast = useMemo(
+    () =>
+      collection.characters
+        .filter((entry) => entry.unlocked)
+        .map((entry) => CHARACTERS[entry.name]?.label)
+        .filter(Boolean),
+    [collection]
   );
 
   // 망각곡선 복습 대상: 세 교재를 모두 합친다.
@@ -327,6 +345,27 @@ export default function Home() {
       .catch(() => {
         if (!cancelled) setHwangsoProblems([]);
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [userInfo]);
+
+  // 저장해 둔 집 단계를 불러온다. (플래너 블롭 → 없으면 이 기기 기록)
+  useEffect(() => {
+    if (!userInfo) return undefined;
+    let cancelled = false;
+    try {
+      const local = window.localStorage.getItem('village-house-level');
+      if (local) setHouseLevel(clampLevel(local));
+    } catch {
+      // 저장소가 막혀 있으면 1단계로 시작한다.
+    }
+    fetchPlanner(userInfo?.name)
+      .then(({ planner }) => {
+        if (cancelled || !planner) return;
+        if (planner.houseLevel != null) setHouseLevel(clampLevel(planner.houseLevel));
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -662,6 +701,25 @@ export default function Home() {
     });
   };
 
+  // 집 업그레이드: 포인트를 실제로 차감하고(시트 반영) 단계를 올린다.
+  const handleUpgradeHouse = async (nextLevel, cost) => {
+    const level = clampLevel(nextLevel);
+    if (level > MAX_HOUSE_LEVEL) throw new Error('이미 최고 단계예요!');
+    if (currentPoints < cost) throw new Error('포인트가 조금 모자라요 🐾');
+
+    // 보상 상점과 같은 방식으로 차감한다. 포인트기록 시트에 내역이 남는다.
+    await handleRedeemPoints(`멍멍 마을 집 ${level}단계`, cost);
+
+    setHouseLevel(level);
+    try {
+      window.localStorage.setItem('village-house-level', String(level));
+    } catch {
+      // 저장 실패해도 이번 화면에서는 올라간 단계가 보인다.
+    }
+    // 기기를 바꿔도 유지되도록 플래너 블롭에도 남긴다.
+    patchPlanner(userInfo?.name, { houseLevel: level }).catch(() => {});
+  };
+
   const handleRedeemPoints = async (item, amount) => {
     const response = await redeemPoints(item, amount, userInfo?.name);
     const responseRoot = getPayloadRoot(response);
@@ -835,6 +893,38 @@ export default function Home() {
           <CharacterCollection totalEarned={totalEarnedPoints} />
         )}
       </div>
+
+      {/* 멍멍 마을 입구 아이콘. 어느 화면에서든 눌러서 들어갈 수 있다. */}
+      {!villageOpen && activeTab !== 'solver' && (
+        <button
+          type="button"
+          onClick={() => setVillageOpen(true)}
+          aria-label="멍멍 마을 열기"
+          className="fixed bottom-5 right-5 z-40 rounded-full border-4 border-white bg-amber-50 p-1 shadow-2xl transition hover:-translate-y-1 hover:bg-amber-100"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={VILLAGE_ICON}
+            alt=""
+            aria-hidden="true"
+            draggable={false}
+            className="h-16 w-16 select-none object-contain sm:h-20 sm:w-20"
+          />
+          <span className="block pb-0.5 text-center text-[11px] font-extrabold text-rose-500">
+            멍멍 마을
+          </span>
+        </button>
+      )}
+
+      {villageOpen && (
+        <Village
+          unlockedNames={villageCast}
+          currentPoints={currentPoints}
+          houseLevel={houseLevel}
+          onUpgrade={handleUpgradeHouse}
+          onClose={() => setVillageOpen(false)}
+        />
+      )}
 
       {/* 레벨업 축하 모달: 문제 풀이(채점) 중에는 방해되지 않도록 미루고, 그 외 화면에서 보여준다. */}
       {levelUp && activeTab !== 'solver' && (

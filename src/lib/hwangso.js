@@ -9,18 +9,27 @@ import { HWANGSO_DATA, hwangsoImageUrl } from './hwangsoData';
 const CSV_PATH = '/data/문항목록.csv';
 const IMAGE_BASE = '/images/hwangso';
 
-// CSV -> 단원 라벨. 파일에는 U1만 있지만, 앞으로 U2/U3가 추가돼도 그대로 동작한다.
-const UNIT_LABELS = {
+// 문항 제목 앞에 붙이는 짧은 단원명.
+// 탭 이름('2단원 식의 계산')을 그대로 붙이면 개념명과 겹쳐 제목이 너무 길어진다.
+const UNIT_SHORT_LABELS = {
   U1: '1단원',
   U2: '2단원',
-  U3: '3단원',
+  // 중1상은 선수학습이라 학년까지 붙여야 아이가 헷갈리지 않는다.
+  U3: '중1상 1단원',
+};
+
+// 탭 이름 / 목록의 단원 표시에 쓰는 전체 이름.
+const UNIT_LABELS = {
+  U1: '1단원',
+  U2: '2단원 식의 계산',
+  U3: '중1상 1단원 자연수의 성질',
 };
 
 // 화면에서 쓸 서브 필터(단원) 목록. 데이터가 아직 없어도 버튼은 항상 노출한다.
 export const HWANGSO_UNITS = [
   { id: 'U1', label: '1단원' },
-  { id: 'U2', label: '2단원' },
-  { id: 'U3', label: '3단원' },
+  { id: 'U2', label: '2단원 식의 계산' },
+  { id: 'U3', label: '중1상 1단원 자연수의 성질' },
 ];
 
 // 문항 유형 코드 -> 사람이 읽는 라벨.
@@ -47,6 +56,32 @@ const CONCEPT_NAMES = {
     C02: '순환소수',
     C03: '순환소수의 분수 표현',
     C04: '순환소수의 사칙연산',
+  },
+  // 2단원(식의 계산)
+  U2: {
+    C01: '지수법칙의 이해',
+    C02: '지수법칙의 활용',
+    C03: '단항식의 곱셈과 나눗셈',
+    C04: '등식을 만족하는 단항식 구하기',
+    C05: '단항식과 다항식의 곱셈과 나눗셈',
+    C06: '등식의 변형',
+    C07: '단항식의 곱셈과 나눗셈의 활용',
+    C08: '식의 값 구하기',
+  },
+  // 3번째 탭: 중1상 1단원(자연수의 성질) — 선수학습
+  U3: {
+    C01: '자연수의 나눗셈과 약수와 배수',
+    C02: '배수판정법 I',
+    C03: '배수판정법 II',
+    C04: '소수와 합성수',
+    C05: '소인수분해',
+    C06: '소인수분해의 활용',
+    C07: '약수의 성질과 약수의 개수',
+    C08: '공배수와 최소공배수',
+    C09: '공약수와 최대공약수',
+    C10: '세 수의 최대공약수와 최소공배수',
+    C11: '공약수와 공배수의 활용',
+    C12: '최대공약수와 최소공배수의 관계',
   },
 };
 
@@ -93,7 +128,9 @@ function buildTitle({ unit, conceptId, probType, mainNum, subNum }) {
     ? `${stripLeadingZero(mainNum)}-${subNum}`
     : stripLeadingZero(mainNum);
   const name = conceptName(unit, conceptId);
-  return `개념탐구${conceptNum ?? ''} _ ${typeLabel}${numberPart} _${name}`;
+  // 목록의 [문항] 열에 단원명이 함께 보이도록 앞에 붙인다.
+  const unitPart = UNIT_SHORT_LABELS[unit] ? `${UNIT_SHORT_LABELS[unit]} ` : '';
+  return `${unitPart}개념탐구${conceptNum ?? ''} _ ${typeLabel}${numberPart} _${name}`;
 }
 
 // 따옴표가 없는 단순 CSV 전용 파서. (문항목록.csv에는 필드 안에 콤마/따옴표가 없다.)
