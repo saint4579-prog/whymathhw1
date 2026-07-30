@@ -29,6 +29,17 @@ import {
 } from '@/lib/villageMotion';
 import { mbtiOf, MBTI_TYPES, pickLine, pickGreeting } from '@/lib/villagePersona';
 import { activeNpcs, frameStyle, walkFrame, npcBoxStyle, npcAnchorTransform } from '@/lib/villageSprites';
+import DialogueBox, { AffinityBurst } from './DialogueBox';
+import {
+  loadAffinity,
+  saveAffinity,
+  affinityTier,
+  TIER_INFO,
+  pickEvent,
+  idleLineFor,
+  pickQuestTargets,
+  DIALOGUE_COOLDOWN_MS,
+} from '@/lib/villageDialogue';
 
 const BUBBLE_MS = 4000;
 // 0.5배까지 줄일 수 있다. 줄이면 섬이 작아지고 둘레에 하늘·산 배경이 넓게 보인다.
@@ -62,6 +73,7 @@ export default function Village({
   unlockedNames = [],
   currentPoints = 0,
   houseLevel = 1,
+  userName,
   onUpgrade,
   onClose,
 }) {
@@ -76,6 +88,17 @@ export default function Village({
   const [selected, setSelected] = useState(null); // 이동 지시를 기다리는 친구 이름
   const [showAreas, setShowAreas] = useState(false);
   const [view, setView] = useState({ zoom: 1, x: 0, y: 0 }); // x,y = 화면 비율 기준 이동량
+
+  // 동물별 지윤이에 대한 호감도. { 이름: 점수 } — 앱을 다시 켜도 유지된다.
+  const [affinity, setAffinity] = useState({});
+  // 지금 열려 있는 대화. { name, event }
+  const [dialogue, setDialogue] = useState(null);
+  // 호감도 변화 효과를 띄울 대상. { name, delta }
+  const [burst, setBurst] = useState(null);
+  // 이번 방문에 '!'를 달고 있는 친구들 (1~2마리)
+  const [questTargets, setQuestTargets] = useState([]);
+  // 이미 대화한 친구의 다음 가능 시각. { 이름: timestamp }
+  const cooldownRef = useRef({});
 
   const actorsRef = useRef([]);
   const frameRef = useRef(0);
@@ -100,6 +123,11 @@ export default function Village({
   const restingCount = Math.max(0, available.length - cast.length);
   const spriteOf = useCallback((name) => Object.values(CHARACTERS).find((c) => c.label === name) ?? null, []);
 
+  // 저장된 호감도 불러오기
+  useEffect(() => {
+    setAffinity(loadAffinity(userName));
+  }, [userName]);
+
   // 스프라이트 시트가 준비된 NPC. 동물 친구들과 함께 마을을 돌아다닌다.
   const npcs = useMemo(() => activeNpcs(), []);
 
@@ -112,6 +140,8 @@ export default function Village({
     actorsRef.current = next;
     setActors(next);
     setSelected(null);
+    // 오늘 말을 걸어올 친구 1~2마리를 고른다. (전부 말을 걸면 공부에 방해가 된다)
+    setQuestTargets(pickQuestTargets(cast));
   }, [cast, npcs]);
 
   useEffect(() => {
@@ -229,21 +259,42 @@ export default function Village({
       return;
     }
 
+    // '!'가 떠 있고 쿨타임도 지났으면 3지 선다 대화를 시작한다.
+    const ready = questTargets.includes(actor.name) && now >= (cooldownRef.current[actor.name] ?? 0);
+    if (ready && !actor.npc) {
+      setDialogue({ name: actor.name, event: pickEvent(actor.name) });
+      setSelected(null);
+      return;
+    }
+
+    // 그 외에는 평소 대사. 호감도 단계에 따라 말투가 달라진다.
+    const line = actor.npc?.lines?.length
+      ? actor.npc.lines[Math.floor(Math.random() * actor.npc.lines.length)]
+      : idleLineFor(actor.name, affinity[actor.name] ?? 0);
     const next = actorsRef.current.map((a, i) =>
-      i === index
-        ? {
-            ...a,
-            // NPC는 자기 대사가 따로 있다.
-            line: a.npc?.lines?.length
-              ? a.npc.lines[Math.floor(Math.random() * a.npc.lines.length)]
-              : pickLine(a.name),
-            lineUntil: now + BUBBLE_MS,
-          }
-        : a
+      i === index ? { ...a, line, lineUntil: now + BUBBLE_MS } : a
     );
     actorsRef.current = next;
     setActors(next);
     setSelected(actor.name);
+  };
+
+  // 대화에서 답을 고르면 호감도를 저장하고 효과를 띄운다.
+  const handleDialogueDone = (applied) => {
+    if (!dialogue) return;
+    const name = dialogue.name;
+    setAffinity((prev) => {
+      const next = { ...prev, [name]: applied.after };
+      saveAffinity(userName, next);
+      return next;
+    });
+    // 같은 친구와 바로 또 대화하지 못하게 쿨타임을 둔다.
+    cooldownRef.current = { ...cooldownRef.current, [name]: Date.now() + DIALOGUE_COOLDOWN_MS };
+    setQuestTargets((prev) => prev.filter((n) => n !== name));
+    if (applied.delta !== 0) {
+      setBurst({ name, delta: applied.delta });
+      setTimeout(() => setBurst(null), 1400);
+    }
   };
 
   const handleUpgrade = async () => {
@@ -448,6 +499,19 @@ export default function Village({
               >
                 <span className="relative block">
                   {actor.line && <SpeechBubble text={actor.line} />}
+                  {/* 오늘 말을 걸어올 친구에게만 느낌표를 띄운다. */}
+                  {!actor.npc && questTargets.includes(actor.name) && !dialogue && (
+                    <span className="animate-quest-bob pointer-events-none absolute -top-6 left-1/2 z-[52] -translate-x-1/2 text-xl drop-shadow">
+                      💬
+                    </span>
+                  )}
+                  {/* 호감도 단계 아이콘. 보통일 때는 굳이 띄우지 않는다. */}
+                  {!actor.npc && affinityTier(affinity[actor.name] ?? 0) !== 'neutral' && (
+                    <span className="pointer-events-none absolute -top-2 -right-1 z-[52] text-sm drop-shadow">
+                      {TIER_INFO[affinityTier(affinity[actor.name] ?? 0)].icon}
+                    </span>
+                  )}
+                  {burst?.name === actor.name && <AffinityBurst delta={burst.delta} />}
                   {actor.npc ? (
                     // 걷는 NPC: 스프라이트 시트에서 지금 프레임만 잘라 보여준다.
                     // 멈춰 있으면 0번(서 있는) 프레임으로 고정한다.
@@ -538,6 +602,16 @@ export default function Village({
           </p>
         )}
 
+        {dialogue && (
+          <DialogueBox
+            animalName={dialogue.name}
+            event={dialogue.event}
+            affinity={affinity[dialogue.name] ?? 0}
+            onDone={handleDialogueDone}
+            onClose={() => setDialogue(null)}
+          />
+        )}
+
         {cast.length === 0 && (
           <div className="absolute inset-0 z-30 flex items-center justify-center">
             <p className="rounded-3xl bg-white/90 px-6 py-4 text-center text-sm font-bold text-stone-500 shadow-lg">
@@ -550,7 +624,12 @@ export default function Village({
       </div>
 
       <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-amber-50/95 px-4 py-2 text-xs font-bold text-stone-400">
-        <span>🐾 친구를 누르면 말을 걸고, 그다음 원하는 자리를 누르면 그곳으로 가요 · 지도를 두 번 누르면 확대돼요</span>
+        <span>🐾 친구를 누르면 말을 걸고, 그다음 원하는 자리를 누르면 그곳으로 가요</span>
+        {questTargets.length > 0 && (
+          <span className="font-extrabold text-rose-500">
+            · 💬 표시가 뜬 친구가 할 말이 있어요! ({questTargets.join(', ')})
+          </span>
+        )}
         {cast.length > 0 && <span>· 오늘 나온 친구 {cast.length}마리</span>}
         {restingCount > 0 && <span>· {restingCount}마리는 집에서 쉬는 중</span>}
         <button

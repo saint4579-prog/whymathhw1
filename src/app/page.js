@@ -921,6 +921,7 @@ export default function Home() {
           unlockedNames={villageCast}
           currentPoints={currentPoints}
           houseLevel={houseLevel}
+          userName={userInfo?.name}
           onUpgrade={handleUpgradeHouse}
           onClose={() => setVillageOpen(false)}
         />

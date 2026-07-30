@@ -86,3 +86,39 @@ body {
     animation: none;
   }
 }
+
+/* 멍멍 마을: 호감도 변화 효과 (하트가 떠오르거나 먹구름이 내려앉는다) */
+@keyframes affinity-burst {
+  0% {
+    transform: translateY(0) scale(0.6);
+    opacity: 0;
+  }
+  25% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-38px) scale(1.15);
+    opacity: 0;
+  }
+}
+
+/* 말 걸 친구 머리 위의 느낌표 */
+@keyframes quest-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.animate-quest-bob {
+  animation: quest-bob 900ms ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-quest-bob {
+    animation: none;
+  }
+}
