@@ -250,6 +250,16 @@ export function stepCharacter(actor, dtSec, now = Date.now(), random = Math.rand
     if (!next.walkingSince) next.walkingSince = now;
   }
 
+  // 집에 가는 길은 지형에 걸리든 말든 곧장 간다.
+  // 옆으로 미끄러지게 두면 연못가나 집 모서리에서 몇십 프레임씩 맴돌아,
+  // 아이 눈에는 '가다 말고 멈춘' 것처럼 보인다.
+  if (next.goingHome) {
+    next.x = clamp(nx, 0.02, 0.98);
+    next.y = clamp(ny, 0.02, 0.98);
+    if (Math.abs(stepX) > 0.0001) next.facing = stepX > 0 ? 1 : -1;
+    return next;
+  }
+
   if (!isWalkable(nx, ny, kind)) {
     // 못 가는 곳이면 옆으로 살짝 돌아가 본다. (연못이나 집을 끼고 도는 효과)
     const slideX = next.x + stepX;
@@ -258,15 +268,6 @@ export function stepCharacter(actor, dtSec, now = Date.now(), random = Math.rand
       next.x = slideX;
     } else if (isWalkable(next.x, slideY, kind)) {
       next.y = slideY;
-    } else if (next.goingHome) {
-      // 집에 가는 길이 막혔어도 포기하지 않는다.
-      // 무작위 목적지로 바꾸거나 그 자리에 멈추면 영영 집에 못 들어간다.
-      // 화단을 조금 밟더라도 문 쪽으로 곧장 한 걸음 옮긴다.
-      next.x = clamp(nx, 0.02, 0.98);
-      next.y = clamp(ny, 0.02, 0.98);
-      next.target = { ...HOUSE_DOOR };
-      if (Math.abs(stepX) > 0.0001) next.facing = stepX > 0 ? 1 : -1;
-      return next;
     } else {
       // 완전히 막혔으면 다른 곳으로 목적지를 바꾼다.
       next.target = randomWalkablePoint(kind, random);

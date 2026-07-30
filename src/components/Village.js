@@ -33,6 +33,8 @@ import {
   findNearbyPair,
   pickCast,
   isAquatic,
+  sendHome,
+  comeOutside,
 } from '@/lib/villageMotion';
 import { mbtiOf, MBTI_TYPES, pickLine, pickGreeting } from '@/lib/villagePersona';
 import { activeNpcs, frameStyle, walkFrame, npcBoxStyle, npcAnchorTransform } from '@/lib/villageSprites';
@@ -46,6 +48,9 @@ import {
   idleLineFor,
   pickQuestTargets,
   DIALOGUE_COOLDOWN_MS,
+  loadNextDialogueAt,
+  saveNextDialogueAt,
+  formatCooldown,
 } from '@/lib/villageDialogue';
 
 const BUBBLE_MS = 4000;
@@ -107,8 +112,10 @@ export default function Village({
   const [burst, setBurst] = useState(null);
   // 이번 방문에 '!'를 달고 있는 친구들 (1~2마리)
   const [questTargets, setQuestTargets] = useState([]);
-  // 이미 대화한 친구의 다음 가능 시각. { 이름: timestamp }
-  const cooldownRef = useRef({});
+  // 다음 대화가 열리는 시각. 친구별이 아니라 마을 전체로 하나다. (5분에 한 번)
+  const [nextDialogueAt, setNextDialogueAt] = useState(0);
+  // 화면에 남은 시간을 보여 주기 위한 지금 시각 (1초마다 갱신)
+  const [now, setNow] = useState(() => Date.now());
 
   const actorsRef = useRef([]);
   const frameRef = useRef(0);
@@ -133,10 +140,19 @@ export default function Village({
   const restingCount = Math.max(0, available.length - cast.length);
   const spriteOf = useCallback((name) => Object.values(CHARACTERS).find((c) => c.label === name) ?? null, []);
 
-  // 저장된 호감도 불러오기
+  // 저장된 호감도와 쿨타임 불러오기
   useEffect(() => {
     setAffinity(loadAffinity(userName));
+    setNextDialogueAt(loadNextDialogueAt(userName));
   }, [userName]);
+
+  // 남은 시간 표시를 위해 1초마다 현재 시각을 갱신한다.
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const dialogueReady = now >= nextDialogueAt;
 
   // 스프라이트 시트가 준비된 NPC. 동물 친구들과 함께 마을을 돌아다닌다.
   const npcs = useMemo(() => activeNpcs(), []);
@@ -187,6 +203,18 @@ export default function Village({
       lastTimeRef.current = 0;
     };
   }, [cast, npcs]);
+
+  // 쿨타임이 끝나면 지윤이가 집에서 나오고, 말 걸 친구도 새로 정해진다.
+  useEffect(() => {
+    if (!dialogueReady) return;
+    const someoneInside = actorsRef.current.some((a) => a.npc && a.hidden);
+    if (someoneInside) {
+      actorsRef.current = actorsRef.current.map((a) => (a.npc && a.hidden ? comeOutside(a) : a));
+      setActors(actorsRef.current);
+      setNotice('지윤이가 다시 나왔어요! 🐾');
+    }
+    setQuestTargets((prev) => (prev.length > 0 ? prev : pickQuestTargets(cast)));
+  }, [dialogueReady, cast]);
 
   // ── 확대 / 이동 ────────────────────────────────────────────────────
   // 확대한 만큼만 움직일 수 있게 막아, 지도가 화면 밖으로 빠져나가지 않게 한다.
@@ -269,8 +297,8 @@ export default function Village({
       return;
     }
 
-    // '!'가 떠 있고 쿨타임도 지났으면 3지 선다 대화를 시작한다.
-    const ready = questTargets.includes(actor.name) && now >= (cooldownRef.current[actor.name] ?? 0);
+    // '!'가 떠 있고 마을 전체 쿨타임도 지났으면 3지 선다 대화를 시작한다.
+    const ready = questTargets.includes(actor.name) && Date.now() >= nextDialogueAt;
     if (ready && !actor.npc) {
       setDialogue({ name: actor.name, event: pickEvent(actor.name) });
       setSelected(null);
@@ -282,7 +310,7 @@ export default function Village({
       ? actor.npc.lines[Math.floor(Math.random() * actor.npc.lines.length)]
       : idleLineFor(actor.name, affinity[actor.name] ?? 0);
     const next = actorsRef.current.map((a, i) =>
-      i === index ? { ...a, line, lineUntil: now + BUBBLE_MS } : a
+      i === index ? { ...a, line, lineUntil: Date.now() + BUBBLE_MS } : a
     );
     actorsRef.current = next;
     setActors(next);
@@ -298,12 +326,23 @@ export default function Village({
       saveAffinity(userName, next);
       return next;
     });
-    // 같은 친구와 바로 또 대화하지 못하게 쿨타임을 둔다.
-    cooldownRef.current = { ...cooldownRef.current, [name]: Date.now() + DIALOGUE_COOLDOWN_MS };
-    setQuestTargets((prev) => prev.filter((n) => n !== name));
+    // 다음 대화까지 마을 전체가 5분 쉰다.
+    const until = Date.now() + DIALOGUE_COOLDOWN_MS;
+    setNextDialogueAt(until);
+    saveNextDialogueAt(userName, until);
+    setQuestTargets([]);
+
     if (applied.delta !== 0) {
       setBurst({ name, delta: applied.delta });
       setTimeout(() => setBurst(null), 1400);
+    }
+
+    // 호감도를 잃었으면 지윤이가 속상해서 집으로 들어간다.
+    // 다음 대화가 열릴 때까지 안 나온다.
+    if (applied.delta < 0) {
+      actorsRef.current = actorsRef.current.map((a) => (a.npc ? sendHome(a) : a));
+      setActors(actorsRef.current);
+      setNotice(`${name}가 서운해했어요. 지윤이가 집으로 들어갔어요 🏠`);
     }
   };
 
@@ -508,6 +547,8 @@ export default function Village({
             const sprite = spriteOf(actor.name);
             // NPC는 낱장 그림이 없고 스프라이트 시트를 쓰므로 sprite가 없어도 그린다.
             if (!sprite && !actor.npc) return null;
+            // 집 안에 들어가 있으면 화면에서 사라진다.
+            if (actor.hidden) return null;
             const type = mbtiOf(actor.name);
             const isSelected = selected === actor.name;
             return (
@@ -530,7 +571,7 @@ export default function Village({
                 <span className="relative block">
                   {actor.line && <SpeechBubble text={actor.line} />}
                   {/* 오늘 말을 걸어올 친구에게만 느낌표를 띄운다. */}
-                  {!actor.npc && questTargets.includes(actor.name) && !dialogue && (
+                  {!actor.npc && questTargets.includes(actor.name) && !dialogue && dialogueReady && (
                     <span className="animate-quest-bob pointer-events-none absolute -top-6 left-1/2 z-[52] -translate-x-1/2 text-xl drop-shadow">
                       💬
                     </span>
@@ -676,9 +717,14 @@ export default function Village({
 
       <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-amber-50/95 px-4 py-2 text-xs font-bold text-stone-400">
         <span>🐾 친구를 누르면 말을 걸고, 그다음 원하는 자리를 누르면 그곳으로 가요</span>
-        {questTargets.length > 0 && (
+        {dialogueReady && questTargets.length > 0 && (
           <span className="font-extrabold text-rose-500">
             · 💬 표시가 뜬 친구가 할 말이 있어요! ({questTargets.join(', ')})
+          </span>
+        )}
+        {!dialogueReady && (
+          <span className="font-bold text-stone-400">
+            · 다음 대화까지 {formatCooldown(nextDialogueAt - now)}
           </span>
         )}
         {cast.length > 0 && <span>· 오늘 나온 친구 {cast.length}마리</span>}
