@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CHARACTERS } from '@/lib/characters';
 import { TIER_INFO, affinityTier, applyChoice, packNameFor } from '@/lib/villageDialogue';
 
@@ -20,12 +20,22 @@ export default function DialogueBox({ animalName, event, affinity = 0, onDone, o
   const sprite = Object.values(CHARACTERS).find((c) => c.label === animalName) ?? null;
   const tier = TIER_INFO[affinityTier(affinity)];
 
+  // 닫기 함수를 ref에 담아 둔다.
+  //
+  // 마을 화면은 캐릭터를 움직이느라 1초에 60번 다시 그려지고, 그때마다 onClose가
+  // 새 함수로 만들어진다. 이걸 아래 useEffect의 의존성에 넣으면 매 프레임 타이머가
+  // 취소되고 새로 시작돼서 2.6초가 영영 채워지지 않는다. → 대화창이 안 닫혔다.
+  const closeRef = useRef(onClose);
+  useEffect(() => {
+    closeRef.current = onClose;
+  }, [onClose]);
+
   // 답을 고르면 리액션을 보여 준 뒤 저절로 닫힌다.
   useEffect(() => {
     if (!result) return undefined;
-    const timer = setTimeout(() => onClose?.(), REACTION_MS);
+    const timer = setTimeout(() => closeRef.current?.(), REACTION_MS);
     return () => clearTimeout(timer);
-  }, [result, onClose]);
+  }, [result]);
 
   const choose = (choice) => {
     if (result) return;
@@ -95,6 +105,13 @@ export default function DialogueBox({ animalName, event, affinity = 0, onDone, o
               {result.delta === 0 && `🐾 ${animalName}는 그냥 그런 표정이에요`}
               {result.delta < 0 && `💧 ${animalName}가 서운해해요 (호감도 ${result.delta})`}
             </p>
+            <button
+              type="button"
+              onClick={() => closeRef.current?.()}
+              className="mt-3 block w-full rounded-2xl bg-stone-100 py-2 text-sm font-bold text-stone-500 hover:bg-stone-200"
+            >
+              닫기
+            </button>
             {result.tierChanged && (
               <p className="mt-2 text-xs font-extrabold text-violet-500">
                 ✨ {animalName}와의 사이가 &lsquo;{TIER_INFO[affinityTier(result.after)].label}&rsquo;(으)로 바뀌었어요!

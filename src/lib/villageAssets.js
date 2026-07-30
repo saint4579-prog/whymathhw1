@@ -57,7 +57,8 @@ export const THEME_SWITCH_LEVEL = 6;
 
 // 나무를 빼낸 섬 바닥. 나무는 따로 전경 레이어로 얹는다.
 // 이렇게 나눠야 캐릭터가 나무 뒤로 가려지거나 앞으로 나오는 게 자연스러워진다.
-export const MEADOW_GROUND = '/images/meadow-background-no-tree.png';
+// 원본에는 투명 체크무늬가 픽셀로 구워져 있어서, 가장자리부터 훑어 지운 판을 쓴다.
+export const MEADOW_GROUND = '/images/meadow-background-clean.png';
 // 전경으로 얹는 나무 (투명 PNG)
 export const TREE_LAYER = '/images/tree-only-transparent.png';
 
