@@ -7,6 +7,19 @@ var USER_SHEET_NAME = '사용자정보';
 var PLANNER_SHEET_NAME = '플래너';
 // 날짜별 하루 계획. 한 행 = 사용자 1명의 하루.
 var PLANNER_DAY_SHEET_NAME = '플래너일자';
+// 종이 학습 체크리스트. 한 행 = 사용자 1명의 문항 1개.
+var CHECKLIST_SHEET_NAME = '체크리스트';
+
+// 체크리스트로 받는 포인트. 직접 풀고 채점하는 것(정답 20P)보다 낮게 둔다.
+// 종이로 풀고 체크만 하는 것이라 앱이 실제 풀이를 확인할 수 없기 때문이다.
+// 값을 바꿀 때는 프론트엔드의 src/lib/checklist.js도 같이 수정해야 한다.
+var CHECKLIST_POINTS_CORRECT = 5;
+var CHECKLIST_POINTS_WRONG = 3;
+// 하루에 체크리스트로 받을 수 있는 상한.
+// 584문항을 마구 체크해서 하루에 만 포인트를 버는 일을 막는다.
+var CHECKLIST_DAILY_CAP = 200;
+// 학습기록 H열(출처)에 남기는 표식. 이 값이 있는 행은 체크리스트에서 온 것이다.
+var CHECKLIST_SOURCE = '체크리스트';
 var PROBLEM_IMAGE_FOLDER_ID = '1QPpZq4iDvnVVaswFQd6YLgY2d4IEGbqG';
 var ANSWER_IMAGE_FOLDER_ID = '1YOtQiOrjbxDh3DNwgdwkA65C9bkbdhDr';
 var TIME_ZONE = 'Asia/Seoul';
@@ -244,11 +257,28 @@ function getCurrentPoints(ss, userName) {
   var studySheet = ss.getSheetByName(STUDY_LOG_SHEET_NAME);
   if (studySheet) {
     var studyData = studySheet.getDataRange().getValues();
+    // 체크리스트에서 온 기록은 요율이 다르고(5P/3P) 하루 상한이 있으므로 날짜별로 따로 모은다.
+    // 직접 풀고 채점한 기록은 예전처럼 그때그때 더한다.
+    var checklistByDate = {};
     for (var i = 1; i < studyData.length; i++) {
       var studyUser = String(studyData[i][5] || '').trim();
       if (userName && studyUser !== userName) continue;
       var answer = studyData[i][2];
-      if (answer === 'O' || answer === 'X') points += pointsForAnswer(answer);
+      if (answer !== 'O' && answer !== 'X') continue;
+
+      if (String(studyData[i][7] || '').trim() === CHECKLIST_SOURCE) {
+        var dateKey = formatDateKey(studyData[i][0]) || 'unknown';
+        checklistByDate[dateKey] = (checklistByDate[dateKey] || 0) +
+          (answer === 'O' ? CHECKLIST_POINTS_CORRECT : CHECKLIST_POINTS_WRONG);
+      } else {
+        points += pointsForAnswer(answer);
+      }
+    }
+    // 날짜별로 상한을 씌운 뒤 더한다.
+    // 이렇게 해야 584문항을 하루에 다 체크해도 그날 받는 건 200P를 넘지 않는다.
+    for (var dk in checklistByDate) {
+      if (!Object.prototype.hasOwnProperty.call(checklistByDate, dk)) continue;
+      points += Math.min(checklistByDate[dk], CHECKLIST_DAILY_CAP);
     }
   }
 
@@ -262,6 +292,192 @@ function getCurrentPoints(ss, userName) {
     }
   }
   return points;
+}
+
+
+// ---------------------------------------------------------------------------
+// 학습 체크리스트
+//
+// 아이가 종이로 풀고 앱에서 체크만 하는 화면. 저장은 두 곳에 나뉜다.
+//   '체크리스트' 시트 : 풀기/맞음/틀림/다시/완료 다섯 칸과 날짜. 화면 복원용.
+//   '학습기록' 시트   : 채점 결과 O/X. 포인트와 망각곡선 복습이 여기를 보기 때문이다.
+//
+// 포인트를 두 번 주지 않는 방법:
+//   학습기록은 (사용자, 문제코드)에 대해 체크리스트발 행을 딱 하나만 유지한다.
+//   같은 문항을 다시 체크하면 그 행을 고쳐 쓰고, 차액만 포인트로 준다.
+//   나중에 아이가 앱에서 그 문제를 직접 풀면 일반 채점 행이 따로 쌓이는데,
+//   그건 실제로 더 한 일이므로 정당한 추가 포인트다.
+// ---------------------------------------------------------------------------
+
+function getChecklistSheet(ss) {
+  return getOrCreateSheet(ss, CHECKLIST_SHEET_NAME,
+    ['사용자', '문제코드', '풀기', '맞음', '틀림', '다시', '완료', '날짜', '메모', '수정일시']);
+}
+
+function checkFlag(value) {
+  return value === true || value === 'TRUE' || value === 'true' || value === 1 || value === '1';
+}
+
+/** 오늘 체크리스트로 이미 받은 포인트 합계 */
+function getChecklistPointsToday(ss, userName, todayKey) {
+  var sheet = ss.getSheetByName(STUDY_LOG_SHEET_NAME);
+  if (!sheet) return 0;
+  var data = sheet.getDataRange().getValues();
+  var total = 0;
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][5] || '').trim() !== userName) continue;
+    if (String(data[i][7] || '').trim() !== CHECKLIST_SOURCE) continue;
+    if (formatDateKey(data[i][0]) !== todayKey) continue;
+    var mark = data[i][2];
+    total += mark === 'O' ? CHECKLIST_POINTS_CORRECT : mark === 'X' ? CHECKLIST_POINTS_WRONG : 0;
+  }
+  // 화면에 보여주는 값도 상한을 넘지 않게 한다. 실제 잔액 계산(getCurrentPoints)과 같은 규칙.
+  return Math.min(total, CHECKLIST_DAILY_CAP);
+}
+
+function doGetChecklist(ss, userName) {
+  var checks = {};
+  var sheet = ss.getSheetByName(CHECKLIST_SHEET_NAME);
+  if (sheet) {
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0] || '').trim() !== userName) continue;
+      var code = String(data[i][1] || '').trim();
+      if (!code) continue;
+      checks[code] = {
+        solved: checkFlag(data[i][2]),
+        correct: checkFlag(data[i][3]),
+        wrong: checkFlag(data[i][4]),
+        retry: checkFlag(data[i][5]),
+        done: checkFlag(data[i][6]),
+        date: formatDateKey(data[i][7]) || '',
+        memo: String(data[i][8] || '')
+      };
+    }
+  }
+  return {
+    status: 'success',
+    checks: checks,
+    earnedToday: getChecklistPointsToday(
+      ss, userName, Utilities.formatDate(new Date(), TIME_ZONE, 'yyyy-MM-dd'))
+  };
+}
+
+function handleSaveChecklist(ss, params) {
+  var userName = String(params.userName || '').trim();
+  if (!userName) throw new Error('사용자 이름이 없습니다.');
+  var entries = params.entries || [];
+  if (!entries.length) return jsonResponse({ status: 'success', granted: 0, capped: false });
+
+  var now = new Date();
+  var todayKey = Utilities.formatDate(now, TIME_ZONE, 'yyyy-MM-dd');
+  var nowText = formatDateTime(now);
+
+  // ① 체크 상태를 '체크리스트' 시트에 upsert
+  var sheet = getChecklistSheet(ss);
+  var data = sheet.getDataRange().getValues();
+  var rowByCode = {};
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0] || '').trim() !== userName) continue;
+    rowByCode[String(data[i][1] || '').trim()] = i + 1;
+  }
+
+  var appendRows = [];
+  for (var e = 0; e < entries.length; e++) {
+    var entry = entries[e] || {};
+    var code = String(entry.code || '').trim();
+    if (!code) continue;
+    var c = entry.checks || {};
+    var row = [
+      userName, code,
+      !!c.solved, !!c.correct, !!c.wrong, !!c.retry, !!c.done,
+      String(c.date || ''), String(c.memo || '').slice(0, 200), nowText
+    ];
+    if (rowByCode[code]) {
+      sheet.getRange(rowByCode[code], 1, 1, row.length).setValues([row]);
+    } else {
+      appendRows.push(row);
+    }
+  }
+  if (appendRows.length > 0) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, appendRows.length, 10).setValues(appendRows);
+  }
+
+  // ② 채점 결과(O/X)를 학습기록에 반영. 포인트는 여기서 계산된다.
+  var studySheet = getOrCreateSheet(ss, STUDY_LOG_SHEET_NAME,
+    ['풀이 일시', '콘텐츠 코드', '정답여부', '풀이 이미지 URL', '학습시간(초)', '학생 이름', '타이핑 답', '출처']);
+  if (studySheet.getRange(1, 8).getValue() === '') {
+    studySheet.getRange(1, 8).setValue('출처').setFontWeight('bold');
+  }
+
+  var studyData = studySheet.getDataRange().getValues();
+  // 이 사용자의 '체크리스트발' 행만 코드별로 찾아 둔다. (일반 채점 행은 건드리지 않는다)
+  var studyRowByCode = {};
+  var earnedToday = 0;
+  for (var s = 1; s < studyData.length; s++) {
+    if (String(studyData[s][5] || '').trim() !== userName) continue;
+    if (String(studyData[s][7] || '').trim() !== CHECKLIST_SOURCE) continue;
+    studyRowByCode[String(studyData[s][1] || '').trim()] = s + 1;
+    if (formatDateKey(studyData[s][0]) === todayKey) {
+      var m = studyData[s][2];
+      earnedToday += m === 'O' ? CHECKLIST_POINTS_CORRECT : m === 'X' ? CHECKLIST_POINTS_WRONG : 0;
+    }
+  }
+
+  var granted = 0;
+  var capped = false;
+  var newStudyRows = [];
+
+  for (var k = 0; k < entries.length; k++) {
+    var it = entries[k] || {};
+    var itCode = String(it.code || '').trim();
+    if (!itCode) continue;
+    var mark = it.mark === 'O' ? 'O' : it.mark === 'X' ? 'X' : '';
+    var existingRow = studyRowByCode[itCode];
+
+    if (!mark) {
+      // 채점 단계가 아니다(풀기만 체크). 예전에 남긴 체크리스트 행이 있으면 비운다.
+      if (existingRow) studySheet.getRange(existingRow, 3).setValue('');
+      continue;
+    }
+
+    var value = mark === 'O' ? CHECKLIST_POINTS_CORRECT : CHECKLIST_POINTS_WRONG;
+    var previous = 0;
+    if (existingRow) {
+      var prevMark = studySheet.getRange(existingRow, 3).getValue();
+      previous = prevMark === 'O' ? CHECKLIST_POINTS_CORRECT
+        : prevMark === 'X' ? CHECKLIST_POINTS_WRONG : 0;
+    }
+    var delta = value - previous;
+
+    // 하루 상한을 넘는 만큼은 주지 않는다. 체크 자체는 그대로 저장된다.
+    if (delta > 0 && earnedToday + granted + delta > CHECKLIST_DAILY_CAP) {
+      var room = Math.max(0, CHECKLIST_DAILY_CAP - earnedToday - granted);
+      if (room <= 0) capped = true;
+      delta = Math.min(delta, room);
+      if (delta <= 0) capped = true;
+    }
+
+    if (existingRow) {
+      studySheet.getRange(existingRow, 1).setValue(nowText);
+      studySheet.getRange(existingRow, 3).setValue(mark);
+    } else {
+      newStudyRows.push([nowText, itCode, mark, '', 0, userName, '', CHECKLIST_SOURCE]);
+    }
+    granted += Math.max(0, delta);
+  }
+
+  if (newStudyRows.length > 0) {
+    studySheet.getRange(studySheet.getLastRow() + 1, 1, newStudyRows.length, 8).setValues(newStudyRows);
+  }
+
+  return jsonResponse({
+    status: 'success',
+    granted: granted,
+    capped: capped,
+    earnedToday: Math.min(earnedToday + granted, CHECKLIST_DAILY_CAP),
+    currentPoints: getCurrentPoints(ss, userName)
+  });
 }
 
 /**
@@ -406,6 +622,10 @@ function doGet(e) {
     ).trim();
 
     // 스터디 플래너/시험 대비 설정 조회. (문제 목록 집계보다 먼저 빠르게 응답)
+    if (e && e.parameter && e.parameter.type === 'GET_CHECKLIST') {
+      return jsonResponse(doGetChecklist(ss, targetUser));
+    }
+
     if (e && e.parameter && e.parameter.type === 'GET_PLANNER') {
       return jsonResponse({
         status: 'success',
@@ -606,6 +826,10 @@ function doPost(e) {
     }
 
     // 스터디 플래너/시험 대비 설정/학원 숙제 통째로 저장.
+    if (params.type === 'SAVE_CHECKLIST') {
+      return handleSaveChecklist(ss, params);
+    }
+
     if (params.type === 'SAVE_PLANNER') {
       savePlannerForUser(ss, params.userName, params.planner);
       return jsonResponse({ status: 'success' });

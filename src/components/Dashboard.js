@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import ProblemListTable from './ProblemListTable';
 import MockExamBoard from './MockExamBoard';
 import HwangsoBoard from './HwangsoBoard';
+import ChecklistBoard from './ChecklistBoard';
 import { hwangsoConceptList, HWANGSO_UNITS, unitLabel } from '@/lib/hwangso';
 import { isSolved, extractPageNumber } from '@/lib/problemUtils';
 import { buildHintResultMessage, prepareGeminiHint } from '@/lib/geminiPrompt';
@@ -170,10 +171,14 @@ export default function Dashboard({
   onSolveMockExam,
   onSolveMockGoal,
   hwangsoProblems = [],
+  userName,
+  onChecklistPoints,
   onSolveHwangso,
   onSolveHwangsoGoal,
 }) {
   const [copying, setCopying] = useState(false);
+  // 황소 화면에서 [문제 목록] / [체크리스트] 중 무엇을 보고 있는지
+  const [hwangsoView, setHwangsoView] = useState('problems');
   const [startPage, setStartPage] = useState('');
   const [endPage, setEndPage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -283,11 +288,42 @@ export default function Dashboard({
           {/* 우측: 상세 통계 패널 */}
           <HwangsoStatsPanel problems={hwangsoProblems} />
         </div>
-        <HwangsoBoard
-          problems={hwangsoProblems}
-          onSolve={onSolveHwangso}
-          onSolveGoal={onSolveHwangsoGoal}
-        />
+        {/* [문제 목록] / [체크리스트] 전환.
+            체크리스트는 종이로 푼 것을 표시하는 화면이고, 같은 문제 코드를 쓰기 때문에
+            둘 중 어디서 체크해도 포인트는 한 번만 들어간다. */}
+        <div className="mb-4 flex gap-2">
+          {[
+            { id: 'problems', label: '📄 문제 목록' },
+            { id: 'checklist', label: '☑️ 체크리스트' },
+          ].map((view) => (
+            <button
+              key={view.id}
+              type="button"
+              onClick={() => setHwangsoView(view.id)}
+              className={`rounded-full px-5 py-2 text-sm font-extrabold shadow-sm transition ${
+                hwangsoView === view.id
+                  ? 'bg-amber-400 text-white shadow-amber-200'
+                  : 'bg-white text-amber-600 hover:bg-amber-50'
+              }`}
+            >
+              {view.label}
+            </button>
+          ))}
+        </div>
+
+        {hwangsoView === 'checklist' ? (
+          <ChecklistBoard
+            hwangsoProblems={hwangsoProblems}
+            userName={userName}
+            onPointsAwarded={onChecklistPoints}
+          />
+        ) : (
+          <HwangsoBoard
+            problems={hwangsoProblems}
+            onSolve={onSolveHwangso}
+            onSolveGoal={onSolveHwangsoGoal}
+          />
+        )}
       </div>
     );
   }

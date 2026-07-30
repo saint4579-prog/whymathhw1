@@ -226,3 +226,49 @@ export function toViewableImageUrl(url) {
   if (!match) return url;
   return `https://lh3.googleusercontent.com/d/${match[1]}=s1600`;
 }
+
+// ---------------------------------------------------------------------------
+// 학습 체크리스트
+// 아이가 종이로 풀고 체크만 하는 화면. 체크는 '체크리스트' 시트에 저장되고,
+// 채점 결과(O/X)는 학습기록에도 남아 포인트와 망각곡선 복습에 반영된다.
+// ---------------------------------------------------------------------------
+
+// 저장된 체크 상태와 오늘 이미 받은 체크리스트 포인트를 가져온다.
+export async function fetchChecklist(userName) {
+  const name = userName ?? getStoredUserName();
+  const url = `${API_URL}?type=GET_CHECKLIST&userName=${encodeURIComponent(name || '')}`;
+  const res = await fetch(url, { cache: 'no-store' });
+  const data = await parseApiResponse(res, '체크리스트를 불러오지 못했습니다.');
+  const root = data?.data && !Array.isArray(data.data) ? data.data : data;
+  return {
+    checks: root?.checks && typeof root.checks === 'object' ? root.checks : {},
+    earnedToday: Number(root?.earnedToday) || 0,
+  };
+}
+
+// 체크 변경분을 저장한다. 배열로 받아 두어, 나중에 "이 개념 전부 체크" 같은
+// 묶음 처리를 추가해도 요청 횟수가 늘지 않는다.
+export async function saveChecklistMarks(userName, entries = []) {
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    redirect: 'follow',
+    body: JSON.stringify({
+      type: 'SAVE_CHECKLIST',
+      userName: userName ?? getStoredUserName(),
+      entries: entries.map((e) => ({
+        code: e.code,
+        checks: e.checks,
+        // 'O' | 'X' | null. null이면 아직 채점 단계가 아니라 포인트도 없다.
+        mark: e.mark ?? null,
+      })),
+    }),
+  });
+  const data = await parseApiResponse(res, '체크 저장에 실패했습니다.');
+  const root = data?.data && !Array.isArray(data.data) ? data.data : data;
+  return {
+    granted: Number(root?.granted) || 0,
+    capped: Boolean(root?.capped),
+    earnedToday: Number(root?.earnedToday) || 0,
+  };
+}

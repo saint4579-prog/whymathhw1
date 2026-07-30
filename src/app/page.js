@@ -750,6 +750,8 @@ export default function Home() {
             onSolveMockExam={handleSolveMockExam}
             onSolveMockGoal={handleSolveMockGoal}
             hwangsoProblems={hwangsoProblems}
+            userName={userInfo?.name}
+            onChecklistPoints={handlePlannerPointsAwarded}
             onSolveHwangso={handleSolveHwangso}
             onSolveHwangsoGoal={handleSolveHwangsoGoal}
           />
