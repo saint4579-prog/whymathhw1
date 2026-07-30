@@ -508,6 +508,31 @@ export function createEmptyDayPlan(dateKey = toDateKey()) {
   };
 }
 
+/**
+ * 저장된 하루 계획을 안전한 모양으로 되돌린다.
+ *
+ * [오늘 할 일] 화면은 같은 days[날짜] 칸에 { todos: [...] }만 적어 넣는다.
+ * 그래서 그 날짜 칸은 '있긴 한데 tasks도 assignments도 없는' 반쪽짜리가 된다.
+ * 예전 코드는 `days[date] ?? createEmptyDayPlan(date)` 였는데, 칸이 비어 있지 않으니
+ * 기본값이 채워지지 않았고 day.tasks가 undefined인 채로 .map()을 만나 화면이 통째로 터졌다.
+ * (아이가 [오늘 할 일]에 하나만 적어도 [스터디 플래너]에 못 들어가던 원인)
+ *
+ * 빠진 칸만 기본값으로 메워서 두 화면이 같은 날짜를 나눠 써도 서로를 깨뜨리지 않게 한다.
+ */
+export function normalizeDayPlan(dateKey, raw) {
+  const base = createEmptyDayPlan(dateKey);
+  if (!raw || typeof raw !== 'object') return base;
+  return {
+    ...base,
+    ...raw,
+    // 목록·표는 형태가 어긋나면 바로 터지므로 한 번 더 확인한다.
+    tasks: Array.isArray(raw.tasks) ? raw.tasks : base.tasks,
+    assignments:
+      raw.assignments && typeof raw.assignments === 'object' ? raw.assignments : base.assignments,
+    todos: Array.isArray(raw.todos) ? raw.todos : [],
+  };
+}
+
 export function createTask(partial = {}) {
   const category = CATEGORIES.find((c) => c.key === partial.category) ?? CATEGORIES[0];
   return {
