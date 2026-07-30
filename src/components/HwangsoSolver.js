@@ -262,7 +262,7 @@ export default function HwangsoSolver({ queue, setQueue, index, setIndex, onGrad
       )}
 
       {/* 상단 정보 + 우측 툴바 */}
-      <div className="mb-3 flex min-h-[44px] flex-wrap items-center justify-between gap-2">
+      <div className="mb-3 flex min-h-[44px] flex-nowrap items-center justify-between gap-2 overflow-x-auto">
         <p className="text-sm font-semibold text-stone-500">
           {queueLabel && (
             <span className="mr-2 rounded-full bg-rose-100 px-3 py-0.5 text-xs font-bold text-rose-500">

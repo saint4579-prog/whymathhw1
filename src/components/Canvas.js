@@ -5,6 +5,15 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 
 const PEN_WIDTH = 2.5;
 const ERASER_WIDTH = 24;
 
+// 지우개 크기 선택값. 화면에서 [얇게/보통/굵게]로 고른다.
+export const ERASER_SIZES = { small: 12, medium: 24, large: 48 };
+
+// 지우개 방식
+//   pixel  : 문지른 자리만 지운다 (기존 방식)
+//   stroke : 닿은 획 하나를 통째로 지운다
+//   area   : 드래그로 감싼 영역 안의 획을 모두 지운다
+export const ERASER_MODES = ['pixel', 'stroke', 'area'];
+
 // 그리기를 허용할 포인터 종류. 아이패드에서는 애플펜슬이 'pen'으로 들어온다.
 // 손가락은 'touch'라서 여기서 걸러지고(그리기 무시) → 화면 스크롤/확대에 쓰인다.
 // 데스크톱 마우스('mouse')는 개발/검수용으로 함께 허용한다. (아이패드에는 mouse 포인터가 없어 사실상 펜 전용)
@@ -16,6 +25,8 @@ const Canvas = forwardRef(function Canvas(
     onDrawEnd,
     color = '#1e293b',
     tool = 'pen',
+    eraserSize = ERASER_SIZES.medium,
+    eraserMode = 'pixel',
     bgImage = null,
     bgOpacity = 0.55,
     bgPosition = 'center', // 'center' | 'top' — 배경 문제 이미지 정렬
@@ -38,6 +49,16 @@ const Canvas = forwardRef(function Canvas(
   const drewSomethingRef = useRef(false);
   // 네이티브 리스너(클로저)가 최신 props를 읽기 위한 거울들
   const disabledRef = useRef(disabled);
+  const eraserSizeRef = useRef(eraserSize);
+  const eraserModeRef = useRef(eraserMode);
+  // 지금까지 그린 획들. [획 지우개]/[영역 지우개]가 되려면 픽셀만으론 부족하고
+  // '어디부터 어디까지가 한 획인지'를 알고 있어야 한다.
+  // { tool, color, width, points: [{x,y}] } 형태로 그린 순서대로 쌓는다.
+  const strokesRef = useRef([]);
+  // 복원된 그림(예전에 저장한 PNG). 획을 지우고 다시 그릴 때 바탕으로 깐다.
+  const baseImageRef = useRef(null);
+  // 영역 지우개로 드래그 중인 사각형
+  const areaRectRef = useRef(null);
   const allowTouchRef = useRef(allowTouch);
   const onDrawEndRef = useRef(onDrawEnd);
 
@@ -50,6 +71,12 @@ const Canvas = forwardRef(function Canvas(
   useEffect(() => {
     disabledRef.current = disabled;
   }, [disabled]);
+  useEffect(() => {
+    eraserSizeRef.current = eraserSize;
+  }, [eraserSize]);
+  useEffect(() => {
+    eraserModeRef.current = eraserMode;
+  }, [eraserMode]);
   useEffect(() => {
     allowTouchRef.current = allowTouch;
   }, [allowTouch]);
@@ -76,10 +103,12 @@ const Canvas = forwardRef(function Canvas(
     if (toolRef.current === 'eraser') {
       ctx.globalCompositeOperation = 'destination-out';
       ctx.strokeStyle = 'rgba(0,0,0,1)';
-      ctx.lineWidth = ERASER_WIDTH;
+      ctx.fillStyle = 'rgba(0,0,0,1)';
+      ctx.lineWidth = eraserSizeRef.current || ERASER_WIDTH;
     } else {
       ctx.globalCompositeOperation = 'source-over';
       ctx.strokeStyle = colorRef.current;
+      ctx.fillStyle = colorRef.current;
       ctx.lineWidth = PEN_WIDTH;
     }
   }, []);
@@ -130,11 +159,15 @@ const Canvas = forwardRef(function Canvas(
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.restore();
     hasContentRef.current = false;
+    strokesRef.current = [];
+    areaRectRef.current = null;
   }, []);
 
   const restoreCanvas = useCallback(
     (dataURL) => {
       clearCanvas();
+      strokesRef.current = [];
+      baseImageRef.current = null;
       if (!dataURL) return Promise.resolve();
 
       const sequence = restoreSequenceRef.current;
@@ -154,6 +187,7 @@ const Canvas = forwardRef(function Canvas(
             ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
             ctx.restore();
             hasContentRef.current = true;
+            baseImageRef.current = image;
             setupContext();
           }
           resolve();
@@ -164,6 +198,62 @@ const Canvas = forwardRef(function Canvas(
     },
     [clearCanvas, setupContext]
   );
+
+  // 기록해 둔 획으로 화면을 처음부터 다시 그린다.
+  // [획 지우개]/[영역 지우개]는 픽셀을 문지르는 게 아니라 획을 목록에서 빼고 다시 그리는 방식이다.
+  const redrawFromStrokes = useCallback(() => {
+    const canvas = canvasRef.current;
+    const ctx = getContext();
+    if (!canvas || !ctx) return;
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // 예전에 저장해 둔 그림이 있으면 먼저 깔아 준다.
+    if (baseImageRef.current) {
+      ctx.drawImage(baseImageRef.current, 0, 0, canvas.width, canvas.height);
+    }
+    ctx.restore();
+
+    setupContext();
+    strokesRef.current.forEach((stroke) => {
+      if (!stroke.points || stroke.points.length === 0) return;
+      ctx.globalCompositeOperation = stroke.tool === 'eraser' ? 'destination-out' : 'source-over';
+      ctx.strokeStyle = stroke.tool === 'eraser' ? 'rgba(0,0,0,1)' : stroke.color;
+      ctx.lineWidth = stroke.width;
+      ctx.beginPath();
+      stroke.points.forEach((pt, i) => {
+        if (i === 0) ctx.moveTo(pt.x, pt.y);
+        else ctx.lineTo(pt.x, pt.y);
+      });
+      // 점 하나짜리 획도 자국이 남게
+      if (stroke.points.length === 1) {
+        const p0 = stroke.points[0];
+        ctx.lineTo(p0.x + 0.1, p0.y + 0.1);
+      }
+      ctx.stroke();
+    });
+    ctx.globalCompositeOperation = 'source-over';
+    hasContentRef.current = Boolean(baseImageRef.current) || strokesRef.current.length > 0;
+  }, [setupContext]);
+
+  // 점 (x,y)에서 가장 가까운 획을 찾는다. 없으면 -1.
+  const findStrokeAt = useCallback((x, y) => {
+    const strokes = strokesRef.current;
+    // 나중에 그린 획이 위에 있으니 뒤에서부터 찾는다.
+    for (let i = strokes.length - 1; i >= 0; i -= 1) {
+      const stroke = strokes[i];
+      if (stroke.tool === 'eraser') continue;
+      const threshold = Math.max(10, stroke.width * 3);
+      const pts = stroke.points || [];
+      for (let j = 0; j < pts.length; j += 1) {
+        const dx = pts[j].x - x;
+        const dy = pts[j].y - y;
+        if (dx * dx + dy * dy <= threshold * threshold) return i;
+      }
+    }
+    return -1;
+  }, []);
 
   useEffect(() => {
     resizeCanvas();
@@ -183,8 +273,17 @@ const Canvas = forwardRef(function Canvas(
       hasContent: () => hasContentRef.current,
       restore: restoreCanvas,
       resize: resizeCanvas,
+      // 획 개수. 지울 게 있는지 화면에서 판단할 때 쓴다.
+      strokeCount: () => strokesRef.current.length,
+      undo: () => {
+        // 마지막 획 하나 되돌리기. 지우개 획도 하나로 취급한다.
+        if (strokesRef.current.length === 0) return false;
+        strokesRef.current = strokesRef.current.slice(0, -1);
+        redrawFromStrokes();
+        return true;
+      },
     }),
-    [clearCanvas, resizeCanvas, restoreCanvas]
+    [clearCanvas, resizeCanvas, restoreCanvas, redrawFromStrokes]
   );
 
   // ---- 그리기 -------------------------------------------------------------
@@ -237,6 +336,9 @@ const Canvas = forwardRef(function Canvas(
       lastPointRef.current = { x, y };
       hasContentRef.current = true;
       drewSomethingRef.current = true;
+      // 지금 그리는 획에 좌표를 이어 붙인다. (획 지우개가 이 목록을 본다)
+      const current = strokesRef.current[strokesRef.current.length - 1];
+      if (current) current.points.push({ x, y });
     };
 
     const onDown = (event) => {
@@ -246,6 +348,52 @@ const Canvas = forwardRef(function Canvas(
       isDrawingRef.current = true;
       drewSomethingRef.current = false;
       lastPointRef.current = posOf(event);
+
+      const erasing = toolRef.current === 'eraser';
+      const mode = eraserModeRef.current;
+
+      // [획 지우개] 닿은 획 하나를 통째로 지운다.
+      if (erasing && mode === 'stroke') {
+        const at = findStrokeAt(lastPointRef.current.x, lastPointRef.current.y);
+        if (at >= 0) {
+          strokesRef.current = strokesRef.current.filter((_, i) => i !== at);
+          redrawFromStrokes();
+          drewSomethingRef.current = true;
+        }
+        try {
+          canvas.setPointerCapture(event.pointerId);
+        } catch {
+          // 캡처 실패는 무시
+        }
+        return;
+      }
+
+      // [영역 지우개] 드래그로 사각형을 그리기 시작한다.
+      if (erasing && mode === 'area') {
+        areaRectRef.current = {
+          x0: lastPointRef.current.x,
+          y0: lastPointRef.current.y,
+          x1: lastPointRef.current.x,
+          y1: lastPointRef.current.y,
+        };
+        try {
+          canvas.setPointerCapture(event.pointerId);
+        } catch {
+          // 캡처 실패는 무시
+        }
+        return;
+      }
+
+      // 여기부터는 펜 또는 [문지르는 지우개]. 새 획을 시작한다.
+      strokesRef.current = [
+        ...strokesRef.current,
+        {
+          tool: erasing ? 'eraser' : 'pen',
+          color: colorRef.current,
+          width: erasing ? eraserSizeRef.current || ERASER_WIDTH : PEN_WIDTH,
+          points: [{ ...lastPointRef.current }],
+        },
+      ];
       applyBrush();
 
       try {
@@ -270,6 +418,46 @@ const Canvas = forwardRef(function Canvas(
       if (activeIdRef.current === null || event.pointerId !== activeIdRef.current) return;
       if (!accepts(event)) return;
       event.preventDefault();
+
+      const erasing = toolRef.current === 'eraser';
+      const mode = eraserModeRef.current;
+
+      // [획 지우개] 문지르는 동안 지나간 획들도 계속 지운다.
+      if (erasing && mode === 'stroke') {
+        const { x, y } = posOf(event);
+        const at = findStrokeAt(x, y);
+        if (at >= 0) {
+          strokesRef.current = strokesRef.current.filter((_, i) => i !== at);
+          redrawFromStrokes();
+          drewSomethingRef.current = true;
+        }
+        return;
+      }
+
+      // [영역 지우개] 사각형을 늘리며 점선으로 미리 보여 준다.
+      if (erasing && mode === 'area' && areaRectRef.current) {
+        const { x, y } = posOf(event);
+        areaRectRef.current = { ...areaRectRef.current, x1: x, y1: y };
+        redrawFromStrokes();
+        const ctx = getContext();
+        if (ctx) {
+          const r = areaRectRef.current;
+          ctx.save();
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.strokeStyle = '#fb7185';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([6, 4]);
+          ctx.strokeRect(
+            Math.min(r.x0, r.x1),
+            Math.min(r.y0, r.y1),
+            Math.abs(r.x1 - r.x0),
+            Math.abs(r.y1 - r.y0)
+          );
+          ctx.restore();
+        }
+        return;
+      }
+
       applyBrush();
 
       const batch =
@@ -289,6 +477,27 @@ const Canvas = forwardRef(function Canvas(
       if (activeIdRef.current === null) return;
       if (event && event.pointerId !== undefined && event.pointerId !== activeIdRef.current) return;
       activeIdRef.current = null;
+
+      // [영역 지우개] 감싼 사각형 안에 점이 하나라도 있는 획을 모두 지운다.
+      if (areaRectRef.current) {
+        const r = areaRectRef.current;
+        areaRectRef.current = null;
+        const left = Math.min(r.x0, r.x1);
+        const right = Math.max(r.x0, r.x1);
+        const top = Math.min(r.y0, r.y1);
+        const bottom = Math.max(r.y0, r.y1);
+        // 손이 살짝 떨린 정도(탭)는 무시한다.
+        if (right - left > 6 || bottom - top > 6) {
+          strokesRef.current = strokesRef.current.filter((stroke) => {
+            if (stroke.tool === 'eraser') return true;
+            return !(stroke.points || []).some(
+              (pt) => pt.x >= left && pt.x <= right && pt.y >= top && pt.y <= bottom
+            );
+          });
+          drewSomethingRef.current = true;
+        }
+        redrawFromStrokes();
+      }
       const wasDrawing = isDrawingRef.current;
       isDrawingRef.current = false;
       if (wasDrawing) onDrawEndRef.current?.(hasContentRef.current);
@@ -330,7 +539,7 @@ const Canvas = forwardRef(function Canvas(
       canvas.removeEventListener('gesturestart', blockGesture);
       canvas.removeEventListener('touchmove', blockGesture);
     };
-  }, [applyBrush]);
+  }, [applyBrush, findStrokeAt, redrawFromStrokes]);
 
   return (
     <div
