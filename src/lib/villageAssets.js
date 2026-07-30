@@ -55,6 +55,12 @@ export const MAX_HOUSE_LEVEL = HOUSE_IDS.length;
 // 6단계부터 배경이 바뀐다.
 export const THEME_SWITCH_LEVEL = 6;
 
+// 나무를 빼낸 섬 바닥. 나무는 따로 전경 레이어로 얹는다.
+// 이렇게 나눠야 캐릭터가 나무 뒤로 가려지거나 앞으로 나오는 게 자연스러워진다.
+export const MEADOW_GROUND = '/images/meadow-background-no-tree.png';
+// 전경으로 얹는 나무 (투명 PNG)
+export const TREE_LAYER = '/images/tree-only-transparent.png';
+
 // 맨 아래에 까는 하늘·산 배경. 섬 그림이 그 위에 얹힌다.
 export const SKY_BACKGROUND = driveImage('1Y8jEDuwezD1EGap5vM8EeD65ZEf6wTb-', 1600);
 

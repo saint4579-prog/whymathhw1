@@ -5,6 +5,8 @@ import { CHARACTERS } from '@/lib/characters';
 import {
   backgroundFor,
   SKY_BACKGROUND,
+  MEADOW_GROUND,
+  TREE_LAYER,
   houseFor,
   houseName,
   upgradeCost,
@@ -19,6 +21,11 @@ import {
   HOUSE_Z_INDEX,
   LAND_POLYGON,
   POND,
+  TREE_ANCHOR,
+  TREE_WIDTH,
+  TREE_BASE,
+  TREE_IMAGE,
+  TREE_Z_INDEX,
   spawnCharacter,
   stepCharacter,
   commandMove,
@@ -81,6 +88,9 @@ export default function Village({
   const cost = upgradeCost(level);
   const isMax = level >= MAX_HOUSE_LEVEL;
   const canUpgrade = !isMax && cost != null && currentPoints >= cost;
+  // 1~5단계 배경만 '나무 없는 바닥 + 전경 나무'로 나뉘어 있다.
+  // 6단계부터 쓰는 두 번째 배경은 나무가 그림에 포함돼 있어 전경 레이어를 쓰지 않는다.
+  const hasTreeLayer = level < THEME_SWITCH_LEVEL;
 
   const [actors, setActors] = useState([]);
   const [upgrading, setUpgrading] = useState(false);
@@ -426,9 +436,18 @@ export default function Village({
             transition: dragRef.current ? 'none' : 'transform 160ms ease-out',
           }}
         >
+          {/*
+            레이어 순서 (아래 → 위)
+              1) 하늘·산                (무대 바깥, 확대/이동 안 따라감)
+              2) 나무 없는 섬 바닥       ← 여기
+              3) 집
+              4) 캐릭터 (y좌표로 앞뒤 정렬)
+              5) 나무 (전경)            ← 캐릭터가 뒤로 가려질 수 있게 맨 위
+            나무를 바닥 그림에서 빼내야 캐릭터가 나무 뒤/앞으로 자연스럽게 지나간다.
+          */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={backgroundFor(level)}
+            src={hasTreeLayer ? MEADOW_GROUND : backgroundFor(level)}
             alt=""
             aria-hidden="true"
             draggable={false}
@@ -452,6 +471,17 @@ export default function Village({
                 fill="#3b82f6"
                 opacity="0.55"
               />
+              {/* 나무 줄기 충돌 영역 */}
+              {hasTreeLayer && (
+                <ellipse
+                  cx={TREE_BASE.x * 100}
+                  cy={TREE_BASE.y * 100}
+                  rx={TREE_BASE.halfWidth * 100}
+                  ry={TREE_BASE.halfHeight * 100}
+                  fill="#78350f"
+                  opacity="0.8"
+                />
+              )}
             </svg>
           )}
 
@@ -560,6 +590,27 @@ export default function Village({
               </button>
             );
           })}
+
+          {/* 전경 나무. 뿌리가 닿는 지점을 기준으로 앉히고, 그 y값으로 z를 정한다.
+              → 뿌리보다 아래에 있는 캐릭터는 나무 앞, 위에 있는 캐릭터는 나무 뒤. */}
+          {hasTreeLayer && (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={TREE_LAYER}
+              alt=""
+              aria-hidden="true"
+              draggable={false}
+              className="pointer-events-none absolute select-none object-contain"
+              style={{
+                left: `${TREE_ANCHOR.x * 100}%`,
+                top: `${TREE_ANCHOR.y * 100}%`,
+                width: `${TREE_WIDTH * 100}%`,
+                // 그림 안의 (줄기 중심, 뿌리 밑동)이 위 좌표에 오도록 끌어올린다.
+                transform: `translate(-${TREE_IMAGE.trunkX * 100}%, -${TREE_IMAGE.rootY * 100}%)`,
+                zIndex: TREE_Z_INDEX,
+              }}
+            />
+          )}
         </div>
 
         {/* 확대 / 이동 조작부 (지도 위에 고정) */}

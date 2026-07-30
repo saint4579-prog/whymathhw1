@@ -38,6 +38,31 @@ export const HOUSE_WIDTH = 0.30;
 // 캐릭터가 못 지나가는 집터. 그림보다 조금 작게 잡아야 답답해 보이지 않는다.
 export const HOUSE_BASE = { x: 0.545, y: 0.375, halfWidth: 0.115, halfHeight: 0.085 };
 
+// ── 나무 (전경 레이어) ─────────────────────────────────────────────────
+//
+// tree-only-transparent.png 를 실제로 재어 본 값 (1254×1254).
+//   줄기 중심 x = 0.50 (캔버스 기준)
+//   뿌리 밑동 y = 0.86
+//   줄기 폭     = 캔버스의 13%
+// 그림 안에서 '뿌리가 땅에 닿는 점'이 어디인지 알아야, 그 점을 지형 좌표에 맞춰
+// 앉힐 수 있고 z-index도 정확히 계산된다.
+export const TREE_IMAGE = { trunkX: 0.50, rootY: 0.86, trunkWidth: 0.13 };
+
+// 지도에서 나무 뿌리가 닿는 자리와 그림 크기
+export const TREE_ANCHOR = { x: 0.30, y: 0.455 };
+export const TREE_WIDTH = 0.30;
+
+// 줄기 충돌 영역. 잎(수관) 밑으로는 지나갈 수 있어야 자연스럽고,
+// 줄기만 못 지나가게 작고 납작하게 잡는다.
+export const TREE_BASE = { x: TREE_ANCHOR.x, y: TREE_ANCHOR.y - 0.012, halfWidth: 0.032, halfHeight: 0.018 };
+
+/** 나무 줄기 자리인가 */
+export function isInsideTree(x, y) {
+  const dx = (x - TREE_BASE.x) / TREE_BASE.halfWidth;
+  const dy = (y - TREE_BASE.y) / TREE_BASE.halfHeight;
+  return dx * dx + dy * dy <= 1;
+}
+
 // 물에 사는 친구들. 이 친구들만 연못에서 논다.
 export const AQUATIC_NAMES = new Set(['개구리', '갈색 펭귄', '검정 펭귄', '해탈한', '고래', '물개']);
 
@@ -86,7 +111,9 @@ export function isInsideHouse(x, y) {
  */
 export function isWalkable(x, y, kind = 'land') {
   if (kind === 'water') return isInPond(x, y, -0.012); // 물가에 걸치지 않게 살짝 안쪽
-  return pointInPolygon(x, y) && !isInPond(x, y, 0.01) && !isInsideHouse(x, y);
+  return (
+    pointInPolygon(x, y) && !isInPond(x, y, 0.01) && !isInsideHouse(x, y) && !isInsideTree(x, y)
+  );
 }
 
 function clamp(value, min, max) {
@@ -226,6 +253,9 @@ export function zIndexFor(y) {
 
 // 집의 z-index. 집 바닥선보다 위에 있는 캐릭터는 집 뒤로 가려진다.
 export const HOUSE_Z_INDEX = zIndexFor(HOUSE_ANCHOR.y);
+// 나무의 z-index. 뿌리보다 아래(y가 큼)에 있는 캐릭터는 나무 앞에,
+// 위에 있는 캐릭터는 나무 뒤로 가려진다.
+export const TREE_Z_INDEX = zIndexFor(TREE_ANCHOR.y);
 
 /** 서로 가까워진 캐릭터 짝을 찾는다. (합동 대사용) */
 export function findNearbyPair(actors, threshold = 0.07, now = Date.now()) {
