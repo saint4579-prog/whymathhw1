@@ -28,6 +28,7 @@ import {
   isAquatic,
 } from '@/lib/villageMotion';
 import { mbtiOf, MBTI_TYPES, pickLine, pickGreeting } from '@/lib/villagePersona';
+import { activeNpcs, frameStyle, walkFrame, npcBoxStyle, npcAnchorTransform } from '@/lib/villageSprites';
 
 const BUBBLE_MS = 4000;
 // 0.5배까지 줄일 수 있다. 줄이면 섬이 작아지고 둘레에 하늘·산 배경이 넓게 보인다.
@@ -99,12 +100,19 @@ export default function Village({
   const restingCount = Math.max(0, available.length - cast.length);
   const spriteOf = useCallback((name) => Object.values(CHARACTERS).find((c) => c.label === name) ?? null, []);
 
+  // 스프라이트 시트가 준비된 NPC. 동물 친구들과 함께 마을을 돌아다닌다.
+  const npcs = useMemo(() => activeNpcs(), []);
+
   useEffect(() => {
-    const next = cast.map((name, index) => spawnCharacter(name, index, cast.length));
+    const animals = cast.map((name, index) => spawnCharacter(name, index, cast.length));
+    const people = npcs.map((npc, index) =>
+      spawnCharacter(npc.name, index, npcs.length, Math.random, npc)
+    );
+    const next = [...animals, ...people];
     actorsRef.current = next;
     setActors(next);
     setSelected(null);
-  }, [cast]);
+  }, [cast, npcs]);
 
   useEffect(() => {
     if (actorsRef.current.length === 0) return undefined;
@@ -138,7 +146,7 @@ export default function Village({
       window.cancelAnimationFrame(frameRef.current);
       lastTimeRef.current = 0;
     };
-  }, [cast]);
+  }, [cast, npcs]);
 
   // ── 확대 / 이동 ────────────────────────────────────────────────────
   // 확대한 만큼만 움직일 수 있게 막아, 지도가 화면 밖으로 빠져나가지 않게 한다.
@@ -222,7 +230,16 @@ export default function Village({
     }
 
     const next = actorsRef.current.map((a, i) =>
-      i === index ? { ...a, line: pickLine(a.name), lineUntil: now + BUBBLE_MS } : a
+      i === index
+        ? {
+            ...a,
+            // NPC는 자기 대사가 따로 있다.
+            line: a.npc?.lines?.length
+              ? a.npc.lines[Math.floor(Math.random() * a.npc.lines.length)]
+              : pickLine(a.name),
+            lineUntil: now + BUBBLE_MS,
+          }
+        : a
     );
     actorsRef.current = next;
     setActors(next);
@@ -408,7 +425,8 @@ export default function Village({
           {/* 캐릭터 */}
           {actors.map((actor, index) => {
             const sprite = spriteOf(actor.name);
-            if (!sprite) return null;
+            // NPC는 낱장 그림이 없고 스프라이트 시트를 쓰므로 sprite가 없어도 그린다.
+            if (!sprite && !actor.npc) return null;
             const type = mbtiOf(actor.name);
             const isSelected = selected === actor.name;
             return (
@@ -422,33 +440,56 @@ export default function Village({
                 style={{
                   left: `${actor.x * 100}%`,
                   top: `${actor.y * 100}%`,
-                  transform: 'translate(-50%, -100%)',
+                  // NPC는 프레임 아래에 발밑 여백(28px)이 있어서 그만큼 더 내려 앉혀야
+                  // 발이 정확히 이 지점에 닿는다. 동물 친구는 그림 아래가 곧 발이라 -100%.
+                  transform: actor.npc ? npcAnchorTransform() : 'translate(-50%, -100%)',
                   zIndex: zIndexFor(actor.y),
                 }}
               >
                 <span className="relative block">
                   {actor.line && <SpeechBubble text={actor.line} />}
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={sprite.src}
-                    alt={actor.name}
-                    draggable={false}
-                    className={`pointer-events-none block h-12 w-auto select-none object-contain sm:h-14 ${
-                      isSelected ? 'animate-mascot-bob' : ''
-                    }`}
-                    style={{
-                      transform: `scaleX(${actor.facing})`,
-                      // 반투명 픽셀을 불투명하게 만들고, 그림자는 필터 안에서 함께 처리한다.
-                      filter: 'url(#village-solid) drop-shadow(0 2px 3px rgba(0,0,0,0.35))',
-                    }}
-                  />
+                  {actor.npc ? (
+                    // 걷는 NPC: 스프라이트 시트에서 지금 프레임만 잘라 보여준다.
+                    // 멈춰 있으면 0번(서 있는) 프레임으로 고정한다.
+                    // 크기는 작은 화면/큰 화면 두 가지를 CSS 변수로 두고 Tailwind가 고르게 한다.
+                    <span
+                      aria-label={actor.name}
+                      className="pointer-events-none block h-[var(--npc-size)] w-[var(--npc-size)] sm:h-[var(--npc-size-sm)] sm:w-[var(--npc-size-sm)]"
+                      style={{
+                        '--npc-size': npcBoxStyle(actor.npc).height,
+                        '--npc-size-sm': npcBoxStyle(actor.npc, true).height,
+                        filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.35))',
+                        ...frameStyle(
+                          actor.npc.sheet,
+                          actor.direction ?? 'downRight',
+                          // 걷는 중이면 시간에 따라 0→1→2→3, 멈춰 있으면 0번(서 있는 자세)
+                          actor.walkingSince ? walkFrame(Date.now() - actor.walkingSince) : 0
+                        ),
+                      }}
+                    />
+                  ) : (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={sprite.src}
+                      alt={actor.name}
+                      draggable={false}
+                      className={`pointer-events-none block h-12 w-auto select-none object-contain sm:h-14 ${
+                        isSelected ? 'animate-mascot-bob' : ''
+                      }`}
+                      style={{
+                        transform: `scaleX(${actor.facing})`,
+                        // 반투명 픽셀을 불투명하게 만들고, 그림자는 필터 안에서 함께 처리한다.
+                        filter: 'url(#village-solid) drop-shadow(0 2px 3px rgba(0,0,0,0.35))',
+                      }}
+                    />
+                  )}
                   <span
                     className={`mt-0.5 block rounded-full px-1.5 text-[9px] font-extrabold text-stone-700 ${
                       isSelected ? 'ring-2 ring-rose-400' : ''
                     }`}
-                    style={{ backgroundColor: MBTI_TYPES[type]?.color ?? '#FDE68A' }}
+                    style={{ backgroundColor: actor.npc ? '#FBCFE8' : MBTI_TYPES[type]?.color ?? '#FDE68A' }}
                   >
-                    {isAquatic(actor.name) ? '🌊 ' : ''}
+                    {actor.npc ? '🙋 ' : isAquatic(actor.name) ? '🌊 ' : ''}
                     {actor.name}
                   </span>
                 </span>

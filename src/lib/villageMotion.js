@@ -110,13 +110,21 @@ export function randomWalkablePoint(kind = 'land', random = Math.random) {
   return { x: 0.5, y: 0.78 };
 }
 
-/** 캐릭터 한 마리의 처음 상태 */
-export function spawnCharacter(name, index, total, random = Math.random) {
-  const kind = isAquatic(name) ? 'water' : 'land';
+/**
+ * 캐릭터 한 마리의 처음 상태.
+ * npc를 넘기면 걷는 스프라이트를 쓰는 NPC가 된다.
+ */
+export function spawnCharacter(name, index, total, random = Math.random, npc = null) {
+  const kind = npc ? 'land' : isAquatic(name) ? 'water' : 'land';
   const start = randomWalkablePoint(kind, random);
   return {
     name,
     kind,
+    // NPC면 스프라이트 정보를 함께 들고 다닌다. (없으면 기존 낱장 그림 캐릭터)
+    npc,
+    // 걷기 애니메이션용: 바라보는 방향과 걷기 시작 시각
+    direction: 'downRight',
+    walkingSince: 0,
     x: start.x,
     y: start.y,
     target: randomWalkablePoint(kind, random),
@@ -142,7 +150,8 @@ export function stepCharacter(actor, dtSec, now = Date.now(), random = Math.rand
   const dy = next.target.y - next.y;
   const distance = Math.hypot(dx, dy);
   // 아이가 시킨 이동은 조금 더 빠르게. 기다리는 재미가 없으면 안 되니까.
-  const stride = SPEED * (next.commanded ? 1.8 : 1) * dtSec;
+  const baseSpeed = next.npc?.speed ?? SPEED;
+  const stride = baseSpeed * (next.commanded ? 1.8 : 1) * dtSec;
 
   if (distance <= stride || distance < 0.004) {
     next.x = next.target.x;
@@ -150,6 +159,7 @@ export function stepCharacter(actor, dtSec, now = Date.now(), random = Math.rand
     next.target = randomWalkablePoint(kind, random);
     next.restUntil = now + REST_MIN_MS + random() * (REST_MAX_MS - REST_MIN_MS);
     next.commanded = false;
+    next.walkingSince = 0; // 멈췄으니 걷기 동작도 멈춘다
     return next;
   }
 
@@ -157,6 +167,14 @@ export function stepCharacter(actor, dtSec, now = Date.now(), random = Math.rand
   const stepY = (dy / distance) * stride;
   const nx = next.x + stepX;
   const ny = next.y + stepY;
+
+  // 걷는 스프라이트는 좌우 반전 대신 방향별 그림이 따로 있다.
+  // 그래서 여기서 바라볼 방향을 정해 둔다. (화면 좌표라 dy>0이 '앞으로')
+  if (next.npc) {
+    next.direction =
+      stepX >= 0 ? (stepY >= 0 ? 'downRight' : 'upRight') : stepY >= 0 ? 'downLeft' : 'upLeft';
+    if (!next.walkingSince) next.walkingSince = now;
+  }
 
   if (!isWalkable(nx, ny, kind)) {
     // 못 가는 곳이면 옆으로 살짝 돌아가 본다. (연못이나 집을 끼고 도는 효과)
