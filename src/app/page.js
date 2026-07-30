@@ -159,10 +159,11 @@ export default function Home() {
     [totalEarnedPoints]
   );
 
-  // 망각곡선 복습 대상: 와이수학 + 황소 문제를 합쳐서 계산한다. (황소도 다음날 복습에 뜨도록)
+  // 망각곡선 복습 대상: 세 교재를 모두 합친다.
+  // 복습 화면에서 대분류(교재)로 골라 볼 수 있으므로 섞여도 헷갈리지 않는다.
   const reviewProblems = useMemo(
-    () => [...problems, ...hwangsoProblems],
-    [problems, hwangsoProblems]
+    () => [...problems, ...mockExamProblems, ...hwangsoProblems],
+    [problems, mockExamProblems, hwangsoProblems]
   );
 
   // 여러 시험 중 "가장 임박한 시험 1개"를 기존 examConfig 형태로 파생한다.
