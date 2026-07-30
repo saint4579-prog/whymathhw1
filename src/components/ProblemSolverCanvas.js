@@ -29,6 +29,9 @@ const ProblemSolverCanvas = forwardRef(function ProblemSolverCanvas(
     onReset,
     disabled = false,
     showTools = true,
+    // 캔버스를 화면보다 크게 넓힌 상태에서는 도구를 화면에 고정해야 한다.
+    // 그러지 않으면 캔버스와 함께 스크롤돼서 화면 밖으로 사라진다.
+    pinTools = false,
   },
   ref
 ) {
@@ -58,20 +61,26 @@ const ProblemSolverCanvas = forwardRef(function ProblemSolverCanvas(
             type="button"
             onClick={onReset}
             disabled={disabled}
-            className="absolute bottom-4 left-4 z-30 rounded-full border-2 border-rose-100 bg-white/95 px-4 py-2.5 text-sm font-extrabold text-stone-600 shadow-xl backdrop-blur transition hover:bg-rose-50 disabled:opacity-40"
+            className={`${
+              pinTools ? 'fixed bottom-6 left-6' : 'absolute bottom-4 left-4'
+            } z-30 rounded-full border-2 border-rose-100 bg-white/95 px-4 py-2.5 text-sm font-extrabold text-stone-600 shadow-xl backdrop-blur transition hover:bg-rose-50 disabled:opacity-40`}
           >
             🗑️ 다시 풀기
           </button>
 
           {/* 지금 어떤 지우개인지 알려 주는 표시 */}
           {tool === 'eraser' && eraserMode !== 'pixel' && (
-            <span className="absolute bottom-[4.5rem] right-4 z-30 rounded-full bg-sky-400 px-3 py-1 text-xs font-extrabold text-white shadow-lg">
+            <span className={`${pinTools ? 'fixed bottom-[5.5rem] right-6' : 'absolute bottom-[4.5rem] right-4'} z-30 rounded-full bg-sky-400 px-3 py-1 text-xs font-extrabold text-white shadow-lg`}>
               {eraserMode === 'stroke' ? '획 지우개' : '영역 지우개'}
             </span>
           )}
 
           {/* 우측 하단: 둥근 플로팅 팔레트 */}
-          <div className="absolute bottom-4 right-4 z-30 flex items-center gap-2 rounded-[1.75rem] border-2 border-rose-100 bg-white/95 p-2 shadow-xl backdrop-blur">
+          <div
+            className={`${
+              pinTools ? 'fixed bottom-6 right-6' : 'absolute bottom-4 right-4'
+            } z-30 flex items-center gap-2 rounded-[1.75rem] border-2 border-rose-100 bg-white/95 p-2 shadow-xl backdrop-blur`}
+          >
             <div className="flex items-center gap-1.5">
               {PEN_COLORS.map((c) => {
                 const active = tool === 'pen' && color === c.value;

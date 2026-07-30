@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ProblemSolverCanvas from './ProblemSolverCanvas';
+import { useCanvasExpander } from './CanvasExpander';
 import TypedAnswerField, { TypedAnswerVerdict } from './TypedAnswerField';
 import ImageLightbox from './ImageLightbox';
 import { toViewableImageUrl } from '@/lib/api';
@@ -87,6 +88,8 @@ export default function ProblemSolver({ queue, setQueue, index, setIndex, onGrad
   };
   const [penColor, setPenColor] = useState('#1e293b');
   const [penTool, setPenTool] = useState('pen');
+  // 캔버스를 아래/오른쪽으로 넓히는 기능. 문제 이미지가 화면을 꽉 채워 쓸 곳이 없을 때 쓴다.
+  const expander = useCanvasExpander(canvasRef, 'yi-canvas-expand');
 
   const problem = queue[index];
   const problemKey = problem?.code ?? null;
@@ -343,19 +346,23 @@ export default function ProblemSolver({ queue, setQueue, index, setIndex, onGrad
 
       {/* 단일 통합 캔버스: 두 단계 모두 사용 (풀이=편집, 채점=읽기전용으로 문제 위 내 풀이 확인) */}
       <div className="flex h-[calc(100vh-140px)] flex-col gap-3">
-        <div className="relative min-h-0 flex-1">
-          <ProblemSolverCanvas
-            ref={canvasRef}
-            bgImage={viewableImageUrl}
-            color={penColor}
-            tool={penTool}
-            onColorChange={setPenColor}
-            onToolChange={setPenTool}
-            onReset={handleResetCanvas}
-            onDrawEnd={setHasCanvasContent}
-            disabled={!isSolving || submitting}
-            showTools={isSolving}
-          />
+        {isSolving && <div className="shrink-0">{expander.controls}</div>}
+        <div {...expander.wrapperProps}>
+          <div className="relative" style={expander.innerStyle}>
+            <ProblemSolverCanvas
+              ref={canvasRef}
+              bgImage={viewableImageUrl}
+              color={penColor}
+              tool={penTool}
+              onColorChange={setPenColor}
+              onToolChange={setPenTool}
+              onReset={handleResetCanvas}
+              onDrawEnd={setHasCanvasContent}
+              disabled={!isSolving || submitting}
+              showTools={isSolving}
+              pinTools={expander.expanded}
+            />
+          </div>
         </div>
         {/* 펜이 말을 안 들을 때를 위한 타이핑 답 입력.
             와이수학 문제집은 시트에 정답 텍스트가 없어 자동채점은 되지 않고,

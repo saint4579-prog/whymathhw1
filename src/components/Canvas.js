@@ -143,7 +143,15 @@ const Canvas = forwardRef(function Canvas(
     if (!ctx) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     if (snapshot.width && snapshot.height) {
-      ctx.drawImage(snapshot, 0, 0, snapshot.width, snapshot.height, 0, 0, nextWidth, nextHeight);
+      // 캔버스가 커질 때는 원래 크기 그대로 왼쪽 위에 붙여 넣는다.
+      // 늘어난 크기에 맞춰 잡아당기면 아이가 쓴 글씨가 세로로 늘어나 버린다.
+      // (캔버스 넓히기 기능을 쓸 때 특히 티가 난다)
+      const growing = nextWidth >= snapshot.width && nextHeight >= snapshot.height;
+      if (growing) {
+        ctx.drawImage(snapshot, 0, 0);
+      } else {
+        ctx.drawImage(snapshot, 0, 0, snapshot.width, snapshot.height, 0, 0, nextWidth, nextHeight);
+      }
     }
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     setupContext();

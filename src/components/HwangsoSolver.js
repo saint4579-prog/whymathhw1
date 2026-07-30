@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ProblemSolverCanvas from './ProblemSolverCanvas';
 import TypedAnswerField, { TypedAnswerVerdict } from './TypedAnswerField';
+import { useCanvasExpander } from './CanvasExpander';
 import ImageLightbox from './ImageLightbox';
 import CharacterMascot from './CharacterMascot';
 
@@ -92,6 +93,8 @@ export default function HwangsoSolver({ queue, setQueue, index, setIndex, onGrad
   const [copyingHint, setCopyingHint] = useState(false);
   const [penColor, setPenColor] = useState('#1e293b');
   const [penTool, setPenTool] = useState('pen');
+  // 캔버스를 아래/오른쪽으로 넓히는 기능. 문제 이미지가 화면을 꽉 채워 쓸 곳이 없을 때 쓴다.
+  const expander = useCanvasExpander(canvasRef, 'hwangso-canvas-expand');
 
   const problem = queue[index];
   const problemKey = problem?.code ?? null;
@@ -330,19 +333,25 @@ export default function HwangsoSolver({ queue, setQueue, index, setIndex, onGrad
 
       {isSolving ? (
         // 단일 통합 캔버스: 문제 이미지가 배경으로 깔리고 그 위에 바로 풀이를 쓴다.
-        <div className="flex h-[calc(100vh-150px)] flex-col gap-3">
-          <div className="relative min-h-0 flex-1">
-            <ProblemSolverCanvas
-              ref={canvasRef}
-              bgImage={imageUrl}
-              color={penColor}
-              tool={penTool}
-              onColorChange={setPenColor}
-              onToolChange={setPenTool}
-              onReset={handleResetCanvas}
-              onDrawEnd={setHasCanvasContent}
-              disabled={submitting}
-            />
+        <div className="flex h-[calc(100vh-150px)] flex-col gap-2">
+          {/* 종이 넓히기 조작부 */}
+          <div className="shrink-0">{expander.controls}</div>
+          {/* 넓힌 만큼 스크롤되는 영역. 문제 이미지는 왼쪽 위에 그대로 있고 빈 종이만 늘어난다. */}
+          <div {...expander.wrapperProps}>
+            <div className="relative" style={expander.innerStyle}>
+              <ProblemSolverCanvas
+                ref={canvasRef}
+                bgImage={imageUrl}
+                color={penColor}
+                tool={penTool}
+                onColorChange={setPenColor}
+                onToolChange={setPenTool}
+                onReset={handleResetCanvas}
+                onDrawEnd={setHasCanvasContent}
+                disabled={submitting}
+                pinTools={expander.expanded}
+              />
+            </div>
           </div>
           {/* 펜이 말을 안 들을 때를 위한 타이핑 답 입력. 채점은 다음 단계에서 한다. */}
           <TypedAnswerField
