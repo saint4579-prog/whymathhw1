@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ProblemSolverCanvas from './ProblemSolverCanvas';
+import TypedAnswerField, { TypedAnswerVerdict } from './TypedAnswerField';
 import ImageLightbox from './ImageLightbox';
 import CharacterMascot from './CharacterMascot';
 
@@ -78,6 +79,12 @@ export default function HwangsoSolver({ queue, setQueue, index, setIndex, onGrad
   const [submitting, setSubmitting] = useState(false);
   const [elapsedTimeSec, setElapsedTimeSec] = useState(0);
   const [hasCanvasContent, setHasCanvasContent] = useState(false);
+  // 문제코드 → 아이가 타이핑한 답. 풀이 단계에서 모아 두고 채점 단계에서 정답과 맞춰 본다.
+  const [typedAnswers, setTypedAnswers] = useState({});
+  const setTypedAnswer = (key, value) => {
+    if (!key) return;
+    setTypedAnswers((prev) => ({ ...prev, [key]: value }));
+  };
   const [layoutMode, setLayoutMode] = useState('horizontal');
   const [imageFitMode, setImageFitMode] = useState('contain');
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
@@ -337,6 +344,12 @@ export default function HwangsoSolver({ queue, setQueue, index, setIndex, onGrad
               disabled={submitting}
             />
           </div>
+          {/* 펜이 말을 안 들을 때를 위한 타이핑 답 입력. 채점은 다음 단계에서 한다. */}
+          <TypedAnswerField
+            value={typedAnswers[problemKey] ?? ''}
+            onChange={(value) => setTypedAnswer(problemKey, value)}
+            disabled={submitting}
+          />
           <button
             type="button"
             onClick={goToNext}
@@ -377,6 +390,12 @@ export default function HwangsoSolver({ queue, setQueue, index, setIndex, onGrad
               </span>
             </section>
           </div>
+
+          {/* 아이가 타이핑으로 답을 냈다면, 정답 위에 자동채점 결과를 먼저 보여 준다. */}
+          <TypedAnswerVerdict
+            typed={typedAnswers[problemKey] ?? ''}
+            correctAnswer={problem.answer ?? ''}
+          />
 
           {/* 하단 전체: 진짜 정답 텍스트 크게 */}
           <section className="rounded-3xl border-4 border-dashed border-sky-200 bg-sky-50/50 p-6 text-center shadow-lg shadow-sky-100/60">
