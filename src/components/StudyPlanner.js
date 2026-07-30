@@ -313,6 +313,8 @@ export default function StudyPlanner({ userName, onPointsAwarded, examConfig, co
   const [goalModalOpen, setGoalModalOpen] = useState(false);
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [slotPickerIndex, setSlotPickerIndex] = useState(null);
+  // 시간표 칸에 넣으려고 고른 할 일. 고른 뒤 '몇 분?'을 정하면 배정이 끝난다.
+  const [pickedTaskId, setPickedTaskId] = useState(null);
   const [missModal, setMissModal] = useState(null);
   const [statsMode, setStatsMode] = useState('planned');
   // 방금 체크한 할 일 id. 체크한 카드에만 짧게 축하 애니메이션을 준다.
@@ -511,18 +513,156 @@ export default function StudyPlanner({ userName, onPointsAwarded, examConfig, co
     celebrateTimerRef.current = setTimeout(() => setJustCheckedId(null), 450);
   };
 
-  const handleAssignSlot = (slotIndex, taskId) => {
+  /**
+   * 할 일을 시간표에 넣는다. 소요 시간만큼 여러 칸을 이어서 차지한다.
+   *
+   * 예전에는 한 칸에 할 일 하나만 들어갔다. 그래서 3시간 걸리는 공부를 넣으려면
+   * '단평준비1'~'단평준비6'처럼 가짜 할 일 6개를 만들어 한 칸씩 배정해야 했다.
+   * 이제 120분짜리 할 일을 30분 단위 시간표의 13시에 넣으면 13:00~15:00 네 칸이
+   * 한 덩어리로 채워진다. 30분짜리는 한 칸만 쓰므로 짧은 공부도 그대로 잘 들어간다.
+   *
+   * @param slotIndex 시작 칸
+   * @param taskId    넣을 할 일 (null이면 비우기)
+   * @param minutes   이 할 일에 쓸 시간(분). 생략하면 할 일에 적힌 예상 시간을 쓴다.
+   */
+  const handleAssignSlot = (slotIndex, taskId, minutes) => {
     setDay((prev) => {
       const next = { ...(prev.assignments ?? {}) };
+      const slotMinutes = prev.slotMinutes || DEFAULT_SLOT_MINUTES;
+      const task = prev.tasks.find((t) => t.id === taskId);
+      const useMinutes = Number(minutes) || Number(task?.minutes) || slotMinutes;
+      // 몇 칸을 차지하는지. 최소 한 칸.
+      const span = Math.max(1, Math.ceil(useMinutes / slotMinutes));
       // 같은 할 일이 다른 칸에 이미 있으면 옮기는 것으로 처리한다.
       Object.keys(next).forEach((key) => {
         if (next[key] === taskId) delete next[key];
       });
-      if (taskId) next[slotIndex] = taskId;
-      else delete next[slotIndex];
-      return { ...prev, assignments: next };
+
+      if (!taskId) {
+        // 비우기: 이 칸이 속한 덩어리 전체를 지운다.
+        // (긴 할 일의 중간 칸을 눌러도 그 할 일이 통째로 빠지도록)
+        const target = prev.assignments?.[slotIndex];
+        if (target) {
+          Object.keys(next).forEach((key) => {
+            if (next[key] === target) delete next[key];
+          });
+        } else {
+          delete next[slotIndex];
+        }
+        return { ...prev, assignments: next };
+      }
+
+      // 차지할 칸들을 먼저 비운다. 먼저 있던 할 일은 통째로 밀려난다.
+      for (let i = 0; i < span; i += 1) {
+        const occupant = next[slotIndex + i];
+        if (occupant && occupant !== taskId) {
+          Object.keys(next).forEach((key) => {
+            if (next[key] === occupant) delete next[key];
+          });
+        }
+      }
+      for (let i = 0; i < span; i += 1) {
+        next[slotIndex + i] = taskId;
+      }
+
+      // 할 일에 적힌 예상 시간도 실제 배정한 시간에 맞춰 둔다.
+      // 그래야 통계의 '계획한 시간'과 시간표가 어긋나지 않는다.
+      const tasks = prev.tasks.map((t) =>
+        t.id === taskId ? { ...t, minutes: span * slotMinutes } : t
+      );
+      return { ...prev, assignments: next, tasks };
     });
     setSlotPickerIndex(null);
+  };
+
+  /**
+   * 시간표 자동 채우기.
+   * 아직 배정되지 않은 할 일들을 시작 시각부터 순서대로, 각자의 예상 시간만큼 붙여 놓는다.
+   * 칸을 하나씩 눌러 고르는 수고를 없애기 위한 기능이다.
+   */
+  const handleAutoArrange = () => {
+    setDay((prev) => {
+      const slotMinutes = prev.slotMinutes || DEFAULT_SLOT_MINUTES;
+      const total = buildTimeSlots(prev.startHour, prev.endHour, slotMinutes).length;
+      const next = {};
+      let cursor = 0;
+      let placed = 0;
+      let overflow = 0;
+
+      prev.tasks.forEach((task) => {
+        const span = Math.max(1, Math.ceil((Number(task.minutes) || slotMinutes) / slotMinutes));
+        if (cursor + span > total) {
+          overflow += 1;
+          return;
+        }
+        for (let i = 0; i < span; i += 1) next[cursor + i] = task.id;
+        cursor += span;
+        placed += 1;
+      });
+
+      setNotice(
+        overflow > 0
+          ? `${placed}개를 시간표에 놓았어요. ${overflow}개는 시간이 부족해서 못 넣었어요 🐾`
+          : `할 일 ${placed}개를 순서대로 놓았어요! 마음에 안 들면 칸을 눌러 바꿔요 🐶`
+      );
+      return { ...prev, assignments: next };
+    });
+  };
+
+  /**
+   * 어제(또는 가장 최근에 계획을 세운 날) 계획을 그대로 오늘로 가져온다.
+   * 완료 표시와 진행량은 초기화해서, 어제 한 것이 오늘 한 것으로 잘못 잡히지 않게 한다.
+   */
+  const handleCopyPreviousDay = () => {
+    const source = findRecentPlannedDate(planner.days, date);
+    if (!source) {
+      setNotice('가져올 지난 계획이 없어요 🦴');
+      return;
+    }
+    const from = planner.days[source];
+    const idMap = {};
+    const tasks = (from.tasks ?? []).map((task) => {
+      const fresh = { ...task, id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` };
+      idMap[task.id] = fresh.id;
+      // 어제의 성과는 지운다. 계획만 베껴 온다.
+      fresh.done = false;
+      fresh.doneAmount = 0;
+      return fresh;
+    });
+    const assignments = {};
+    Object.entries(from.assignments ?? {}).forEach(([slot, taskId]) => {
+      if (idMap[taskId]) assignments[slot] = idMap[taskId];
+    });
+
+    setDay((prev) => ({
+      ...prev,
+      slotMinutes: from.slotMinutes ?? prev.slotMinutes,
+      startHour: from.startHour ?? prev.startHour,
+      endHour: from.endHour ?? prev.endHour,
+      setupDone: true,
+      tasks: [...prev.tasks, ...tasks],
+      assignments: { ...(prev.assignments ?? {}), ...assignments },
+    }));
+    setNotice(`${source} 계획에서 할 일 ${tasks.length}개를 가져왔어요 🐶`);
+  };
+
+  /** 할 일 하나를 그대로 하나 더 만든다. (비슷한 공부를 여러 번 할 때) */
+  const handleDuplicateTask = (taskId) => {
+    setDay((prev) => {
+      const origin = prev.tasks.find((t) => t.id === taskId);
+      if (!origin) return prev;
+      const copy = {
+        ...origin,
+        id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        done: false,
+        doneAmount: 0,
+      };
+      // 원본 바로 뒤에 끼워 넣어야 목록에서 찾기 쉽다.
+      const at = prev.tasks.findIndex((t) => t.id === taskId);
+      const tasks = [...prev.tasks];
+      tasks.splice(at + 1, 0, copy);
+      return { ...prev, tasks };
+    });
   };
 
   const handleAddGoal = (draft) => {
@@ -816,7 +956,8 @@ export default function StudyPlanner({ userName, onPointsAwarded, examConfig, co
             title="오늘 할 일"
             right={
               <div className="flex gap-2">
-                <PillButton onClick={handleAutoFill}>🐶 자동으로 담기</PillButton>
+                <PillButton onClick={handleAutoFill}>🐶 목표에서 담기</PillButton>
+                <PillButton onClick={handleCopyPreviousDay}>📋 지난 계획 복사</PillButton>
                 <button
                   type="button"
                   onClick={() => setTaskModalOpen(true)}
@@ -846,6 +987,7 @@ export default function StudyPlanner({ userName, onPointsAwarded, examConfig, co
                   justChecked={justCheckedId === task.id}
                   onToggle={() => handleToggleTask(task.id)}
                   onStep={(delta) => handleStepTask(task.id, delta)}
+                  onDuplicate={() => handleDuplicateTask(task.id)}
                   onRemove={() => handleRemoveTask(task.id)}
                 />
               ))}
@@ -872,9 +1014,12 @@ export default function StudyPlanner({ userName, onPointsAwarded, examConfig, co
             title="오늘의 시간표"
             right={
               day.setupDone ? (
+                <div className="flex gap-2">
+                <PillButton onClick={handleAutoArrange}>✨ 자동 채우기</PillButton>
                 <PillButton onClick={() => setDay((prev) => ({ ...prev, setupDone: false }))}>
                   ⚙️ 다시 설정
                 </PillButton>
+                </div>
               ) : null
             }
           />
@@ -906,6 +1051,32 @@ export default function StudyPlanner({ userName, onPointsAwarded, examConfig, co
                 const category = task ? CATEGORIES.find((c) => c.key === task.category) : null;
                 const isNow =
                   date === todayKey && currentSlotIndex(slots) === slot.index;
+                // 긴 할 일이 여러 칸을 차지할 때, 제목은 첫 칸에만 쓰고 나머지 칸은
+                // 같은 색 띠만 이어 그린다. 그래야 한 덩어리로 보인다.
+                const isBlockStart = !task || day.assignments?.[slot.index - 1] !== taskId;
+                const isBlockEnd = !task || day.assignments?.[slot.index + 1] !== taskId;
+                if (task && !isBlockStart) {
+                  return (
+                    <button
+                      key={slot.index}
+                      data-slot={slot.index}
+                      type="button"
+                      onClick={() => setSlotPickerIndex(slot.index)}
+                      className={`-mt-1.5 mb-1.5 flex w-full items-stretch gap-3 border-2 border-transparent px-2 text-left ${
+                        isNow ? 'bg-rose-50' : ''
+                      }`}
+                    >
+                      <span className="w-14 shrink-0 pt-1 text-[11px] font-bold text-stone-300">
+                        {slot.label}
+                      </span>
+                      <span
+                        className={`min-h-8 flex-1 ${isBlockEnd ? 'rounded-b-xl' : ''}`}
+                        style={{ backgroundColor: `${category?.color ?? '#F9A8D4'}55` }}
+                      />
+                      {isNow && <span className="shrink-0 text-lg">🐕</span>}
+                    </button>
+                  );
+                }
                 return (
                   <button
                     key={slot.index}
@@ -960,9 +1131,57 @@ export default function StudyPlanner({ userName, onPointsAwarded, examConfig, co
       {slotPickerIndex !== null && (
         <Modal
           title={`${slots[slotPickerIndex]?.label} 에 뭘 할까요?`}
-          subtitle="할 일 리스트에서 하나를 골라 주세요"
-          onClose={() => setSlotPickerIndex(null)}
+          subtitle="할 일을 고르고, 얼마나 걸릴지 정해요"
+          onClose={() => {
+            setSlotPickerIndex(null);
+            setPickedTaskId(null);
+          }}
         >
+          {/* 시간 선택은 반드시 목록 '위'에 있어야 한다.
+              아래에 두면 할 일이 여러 개일 때 화면 밖으로 밀려서, 아이가 할 일을 눌러도
+              아무 변화가 없는 것처럼 보인다. 그러면 시간을 못 정하고 전부 한 칸(기본값)으로만
+              들어가고, 3시간짜리 공부를 '단평준비1~6'으로 쪼개는 수밖에 없어진다. */}
+          {pickedTaskId ? (
+            <div className="mb-4 rounded-2xl border-2 border-rose-200 bg-amber-50 p-4">
+              <p className="mb-1 text-sm font-extrabold text-stone-700">
+                ⏱️ &lsquo;{day.tasks.find((t) => t.id === pickedTaskId)?.title || '고른 할 일'}&rsquo;
+                은 얼마나 걸릴까요?
+              </p>
+              <p className="mb-3 text-xs font-bold text-stone-400">
+                {slots[slotPickerIndex]?.label} 부터 이만큼 시간표를 차지해요
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {DURATION_CHOICES.filter((m) => m >= (day.slotMinutes || DEFAULT_SLOT_MINUTES)).map(
+                  (minutes) => (
+                    <PillButton
+                      key={minutes}
+                      onClick={() => {
+                        handleAssignSlot(slotPickerIndex, pickedTaskId, minutes);
+                        setPickedTaskId(null);
+                      }}
+                      className="px-4 py-2.5 text-base"
+                    >
+                      {formatDuration(minutes)}
+                    </PillButton>
+                  )
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setPickedTaskId(null)}
+                className="mt-3 text-xs font-bold text-stone-400 underline"
+              >
+                다른 할 일 고르기
+              </button>
+            </div>
+          ) : (
+            day.tasks.length > 0 && (
+              <p className="mb-3 rounded-2xl bg-amber-50 px-4 py-2 text-center text-xs font-bold text-stone-500">
+                🐾 할 일을 누르면 여기에 시간 선택이 나와요
+              </p>
+            )
+          )}
+
           {day.tasks.length === 0 ? (
             <p className="p-4 text-center text-sm font-bold text-stone-400">
               먼저 &lsquo;오늘 할 일&rsquo;에 계획을 담아 주세요 🐾
@@ -975,8 +1194,10 @@ export default function StudyPlanner({ userName, onPointsAwarded, examConfig, co
                   <li key={task.id}>
                     <button
                       type="button"
-                      onClick={() => handleAssignSlot(slotPickerIndex, task.id)}
-                      className="flex w-full items-center gap-3 rounded-2xl border-2 border-white bg-white p-3 text-left shadow-sm hover:border-rose-200"
+                      onClick={() => setPickedTaskId(task.id)}
+                      className={`flex w-full items-center gap-3 rounded-2xl border-2 bg-white p-3 text-left shadow-sm hover:border-rose-200 ${
+                        pickedTaskId === task.id ? 'border-rose-300' : 'border-white'
+                      }`}
                     >
                       <span className="text-2xl">{category?.emoji}</span>
                       <span className="min-w-0 flex-1">
@@ -1001,7 +1222,10 @@ export default function StudyPlanner({ userName, onPointsAwarded, examConfig, co
           )}
           <button
             type="button"
-            onClick={() => handleAssignSlot(slotPickerIndex, null)}
+            onClick={() => {
+              handleAssignSlot(slotPickerIndex, null);
+              setPickedTaskId(null);
+            }}
             className="mt-3 w-full rounded-full bg-stone-100 px-4 py-2 text-sm font-bold text-stone-500 hover:bg-stone-200"
           >
             이 칸 비우기
@@ -1049,7 +1273,7 @@ function StatBox({ emoji, label, value, tone = 'rose' }) {
  * 주의: 바깥이 클릭 영역이라 안쪽 조작부는 button이 아닌 div(role="button")로 감싸고,
  * −/+와 삭제는 stopPropagation으로 카드 토글이 같이 일어나지 않게 막는다.
  */
-function TaskRow({ task, assigned, justChecked, onToggle, onStep, onRemove }) {
+function TaskRow({ task, assigned, justChecked, onToggle, onStep, onDuplicate, onRemove }) {
   const category = CATEGORIES.find((c) => c.key === task.category);
   const unitLabel = task.unit === 'problem' ? '문제' : 'p';
   const doneAmount = task.done ? task.amount : Math.max(0, Number(task.doneAmount) || 0);
@@ -1138,10 +1362,18 @@ function TaskRow({ task, assigned, justChecked, onToggle, onStep, onRemove }) {
           >
             +
           </button>
+          {/* 비슷한 공부를 여러 번 할 때, 처음부터 다시 적지 않고 하나 더 만든다. */}
+          <button
+            type="button"
+            onClick={onDuplicate}
+            className="ml-1 rounded-full bg-stone-100 px-3 py-2 text-xs font-bold text-stone-500 transition hover:bg-amber-100 hover:text-amber-700"
+          >
+            복사
+          </button>
           <button
             type="button"
             onClick={onRemove}
-            className="ml-1 rounded-full bg-stone-100 px-3 py-2 text-xs font-bold text-stone-400 transition hover:bg-rose-100 hover:text-rose-500"
+            className="rounded-full bg-stone-100 px-3 py-2 text-xs font-bold text-stone-400 transition hover:bg-rose-100 hover:text-rose-500"
           >
             삭제
           </button>
@@ -1629,6 +1861,28 @@ function Field({ label, children }) {
       <span className="mb-1 block text-xs font-extrabold text-stone-500">{label}</span>
       {children}
     </label>
+  );
+}
+
+// 시간표에 배정할 때 고를 수 있는 소요 시간(분).
+// 시간표 칸 단위보다 짧은 항목은 화면에서 자동으로 걸러진다.
+const DURATION_CHOICES = [10, 20, 30, 40, 50, 60, 90, 120, 150, 180];
+
+function formatDuration(minutes) {
+  const m = Math.max(0, Math.round(Number(minutes) || 0));
+  if (m < 60) return `${m}분`;
+  const hours = Math.floor(m / 60);
+  const rest = m % 60;
+  return rest ? `${hours}시간 ${rest}분` : `${hours}시간`;
+}
+
+/** 기준 날짜보다 앞선 날 중, 할 일이 하나라도 있던 가장 최근 날짜. 없으면 null */
+function findRecentPlannedDate(days = {}, beforeDate) {
+  return (
+    Object.keys(days)
+      .filter((d) => d < beforeDate && (days[d]?.tasks?.length ?? 0) > 0)
+      .sort()
+      .pop() ?? null
   );
 }
 

@@ -120,11 +120,12 @@ function writePlannerDays(ss, userName, days, now) {
 /**
  * [1회 실행] 예전 구조에서 새 구조로 옮긴다.
  *
- * 실행 방법: 앱스 스크립트 편집기 함수 목록에서 '플래너_구조이전'을 고르고 ▶ 실행.
+ * 실행 방법: 앱스 스크립트 편집기 함수 목록에서 'migratePlannerDays'를 고르고 ▶ 실행.
+ * (편집기 함수 목록이 한글 이름을 잘 못 잡는 경우가 있어 영문 이름으로 두었다.)
  * '플래너' 셀 하나에 뭉쳐 있던 days를 '플래너일자'의 날짜별 행으로 쪼개고,
  * 원래 셀의 days는 빈 객체로 비운다. 두 번 실행해도 안전하다.
  */
-function 플래너_구조이전() {
+function migratePlannerDays() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(PLANNER_SHEET_NAME);
   if (!sheet) return '플래너 시트가 없습니다.';
@@ -766,4 +767,9 @@ function doPost(e) {
       // 잠금을 얻기 전에 실패한 경우에는 해제할 잠금이 없다.
     }
   }
+}
+
+// 한글 이름으로 찾고 싶을 때를 위한 별칭. 둘 중 아무거나 실행하면 된다.
+function 플래너_구조이전() {
+  return migratePlannerDays();
 }
