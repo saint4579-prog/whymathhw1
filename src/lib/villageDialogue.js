@@ -309,5 +309,39 @@ export function pickQuestTargets(names = [], random = Math.random) {
   return picked;
 }
 
-// 같은 친구와 다시 대화할 수 있게 되기까지의 시간
-export const DIALOGUE_COOLDOWN_MS = 3 * 60 * 1000;
+// 다음 대화가 열리기까지의 시간.
+// 친구별이 아니라 '마을 전체'로 한 번이다. 5분에 한 번만 말을 걸 수 있으니
+// 아이가 대화를 몰아서 하느라 공부를 놓치는 일이 없다.
+export const DIALOGUE_COOLDOWN_MS = 5 * 60 * 1000;
+
+const COOLDOWN_KEY = 'village-next-dialogue';
+
+/** 다음 대화가 가능해지는 시각(ms). 마을을 나갔다 들어와도 유지된다. */
+export function loadNextDialogueAt(userName) {
+  if (typeof window === 'undefined') return 0;
+  try {
+    const raw = window.localStorage.getItem(`${COOLDOWN_KEY}:${userName || 'guest'}`);
+    const at = Number(raw);
+    return Number.isFinite(at) ? at : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function saveNextDialogueAt(userName, at) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(`${COOLDOWN_KEY}:${userName || 'guest'}`, String(at));
+  } catch {
+    // 저장 실패해도 이번 방문 동안의 쿨타임은 화면에서 지켜진다.
+  }
+}
+
+/** 남은 시간을 '3분 20초'처럼 읽기 좋게 */
+export function formatCooldown(ms) {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const min = Math.floor(total / 60);
+  const sec = total % 60;
+  if (min <= 0) return `${sec}초`;
+  return sec > 0 ? `${min}분 ${sec}초` : `${min}분`;
+}

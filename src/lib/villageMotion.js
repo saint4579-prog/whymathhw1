@@ -38,6 +38,14 @@ export const HOUSE_WIDTH = 0.30;
 // 캐릭터가 못 지나가는 집터. 그림보다 조금 작게 잡아야 답답해 보이지 않는다.
 export const HOUSE_BASE = { x: 0.545, y: 0.375, halfWidth: 0.115, halfHeight: 0.085 };
 
+// 집 현관. 지윤이가 삐졌을 때 여기로 걸어가서 안으로 들어간다.
+// 집터(충돌 영역) 바로 '아래' 잔디에 둬야 한다. 집터 안에 두면 갈 수 없는 자리라
+// 문 앞까지 가지도 못하고 그 자리에 멈춰 버린다.
+export const HOUSE_DOOR = {
+  x: HOUSE_ANCHOR.x,
+  y: HOUSE_BASE.y + HOUSE_BASE.halfHeight + 0.015,
+};
+
 // ── 나무 (전경 레이어) ─────────────────────────────────────────────────
 //
 // tree-only-transparent.png 를 실제로 재어 본 값 (1254×1254).
@@ -162,6 +170,34 @@ export function spawnCharacter(name, index, total, random = Math.random, npc = n
     lineUntil: 0,
     // 아이가 "저기로 가"라고 찍어 준 자리. 이때는 쉬지 않고 곧장 간다.
     commanded: false,
+    // 집으로 돌아가는 중인가 / 집 안에 들어가 있는가
+    goingHome: false,
+    hidden: false,
+  };
+}
+
+/**
+ * 집으로 돌려보낸다. 문 앞까지 걸어간 뒤 안으로 들어간다.
+ * (바로 사라지면 아이가 무슨 일인지 모른다. 걸어가는 모습을 보여 줘야
+ *  "삐져서 들어갔구나"를 알 수 있다.)
+ */
+export function sendHome(actor) {
+  const moved = commandMove(actor, HOUSE_DOOR.x, HOUSE_DOOR.y);
+  return { ...moved, goingHome: true, line: null, lineUntil: 0 };
+}
+
+/** 집에서 다시 나온다. 문 앞에서 시작해 마당으로 걸어간다. */
+export function comeOutside(actor, random = Math.random) {
+  return {
+    ...actor,
+    hidden: false,
+    goingHome: false,
+    commanded: false,
+    x: HOUSE_DOOR.x,
+    y: HOUSE_DOOR.y,
+    target: randomWalkablePoint(actor.kind ?? 'land', random),
+    restUntil: 0,
+    walkingSince: 0,
   };
 }
 
@@ -169,6 +205,9 @@ export function spawnCharacter(name, index, total, random = Math.random, npc = n
 export function stepCharacter(actor, dtSec, now = Date.now(), random = Math.random) {
   const next = { ...actor };
   const kind = next.kind ?? 'land';
+
+  // 집 안에 있으면 아무것도 하지 않는다.
+  if (next.hidden) return next;
 
   if (next.line && now >= next.lineUntil) next.line = null;
   if (now < next.restUntil) return next;
@@ -183,6 +222,14 @@ export function stepCharacter(actor, dtSec, now = Date.now(), random = Math.rand
   if (distance <= stride || distance < 0.004) {
     next.x = next.target.x;
     next.y = next.target.y;
+    // 집으로 가던 길이었다면 문 앞에 닿았으니 안으로 들어간다.
+    if (next.goingHome) {
+      next.hidden = true;
+      next.goingHome = false;
+      next.commanded = false;
+      next.walkingSince = 0;
+      return next;
+    }
     next.target = randomWalkablePoint(kind, random);
     next.restUntil = now + REST_MIN_MS + random() * (REST_MAX_MS - REST_MIN_MS);
     next.commanded = false;
@@ -211,6 +258,15 @@ export function stepCharacter(actor, dtSec, now = Date.now(), random = Math.rand
       next.x = slideX;
     } else if (isWalkable(next.x, slideY, kind)) {
       next.y = slideY;
+    } else if (next.goingHome) {
+      // 집에 가는 길이 막혔어도 포기하지 않는다.
+      // 무작위 목적지로 바꾸거나 그 자리에 멈추면 영영 집에 못 들어간다.
+      // 화단을 조금 밟더라도 문 쪽으로 곧장 한 걸음 옮긴다.
+      next.x = clamp(nx, 0.02, 0.98);
+      next.y = clamp(ny, 0.02, 0.98);
+      next.target = { ...HOUSE_DOOR };
+      if (Math.abs(stepX) > 0.0001) next.facing = stepX > 0 ? 1 : -1;
+      return next;
     } else {
       // 완전히 막혔으면 다른 곳으로 목적지를 바꾼다.
       next.target = randomWalkablePoint(kind, random);
