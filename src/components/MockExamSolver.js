@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ProblemSolverCanvas from './ProblemSolverCanvas';
 import { useCanvasExpander } from './CanvasExpander';
+import TypedAnswerField, { TypedAnswerVerdict } from './TypedAnswerField';
 import ImageLightbox from './ImageLightbox';
 import { toViewableImageUrl } from '@/lib/api';
 import { buildHintResultMessage, prepareGeminiHint } from '@/lib/geminiPrompt';

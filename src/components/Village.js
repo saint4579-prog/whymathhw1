@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CHARACTERS } from '@/lib/characters';
 import {
   backgroundFor,
+  SKY_BACKGROUND,
   houseFor,
   houseName,
   upgradeCost,
@@ -29,8 +30,13 @@ import {
 import { mbtiOf, MBTI_TYPES, pickLine, pickGreeting } from '@/lib/villagePersona';
 
 const BUBBLE_MS = 4000;
-const MIN_ZOOM = 1;
+// 0.5배까지 줄일 수 있다. 줄이면 섬이 작아지고 둘레에 하늘·산 배경이 넓게 보인다.
+const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;
+// 화살표 한 번에 움직이는 양(화면의 몇 %)
+const PAN_STEP = 0.12;
+// 1배일 때는 움직일 여백이 아예 없다. 그래서 화살표를 누르면 이만큼 자동으로 확대해 준다.
+const AUTO_ZOOM = 1.8;
 
 function SpeechBubble({ text }) {
   return (
@@ -138,7 +144,8 @@ export default function Village({
   // 확대한 만큼만 움직일 수 있게 막아, 지도가 화면 밖으로 빠져나가지 않게 한다.
   const clampView = useCallback((next) => {
     const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next.zoom));
-    const limit = (zoom - 1) / (2 * zoom);
+    // 1배보다 작으면 지도가 화면보다 작아서 밀 여백이 없다. 이때는 가운데 고정.
+    const limit = Math.max(0, (zoom - 1) / (2 * zoom));
     return {
       zoom,
       x: Math.min(limit, Math.max(-limit, next.x)),
@@ -148,7 +155,14 @@ export default function Village({
 
   const zoomBy = (delta) => setView((v) => clampView({ ...v, zoom: v.zoom + delta }));
   const resetView = () => setView({ zoom: 1, x: 0, y: 0 });
-  const panBy = (dx, dy) => setView((v) => clampView({ ...v, x: v.x + dx, y: v.y + dy }));
+
+  // 화살표로 이동. 아직 1배라 움직일 여백이 없으면 먼저 확대부터 해 준다.
+  // (그러지 않으면 아이가 화살표를 눌러도 아무 일도 안 일어나는 것처럼 보인다)
+  const panBy = (dx, dy) =>
+    setView((v) => {
+      const zoom = v.zoom <= 1 ? AUTO_ZOOM : v.zoom;
+      return clampView({ zoom, x: v.x + dx, y: v.y + dy });
+    });
 
   // 손가락/마우스로 끌어서 이동
   const onStageDown = (event) => {
@@ -313,7 +327,28 @@ export default function Village({
         onPointerUp={onStageUp}
         onPointerCancel={onStageUp}
         onClick={handleStageClick}
+        onDoubleClick={() => setView((v) => clampView({ ...v, zoom: v.zoom >= MAX_ZOOM ? 1 : v.zoom + 0.8 }))}
+        onContextMenu={(event) => {
+          // 길게 누르기(우클릭)로 축소. 아이패드에서 두 손가락 없이도 줄일 수 있게.
+          event.preventDefault();
+          zoomBy(-0.4);
+        }}
+        onWheel={(event) => {
+          event.preventDefault();
+          zoomBy(event.deltaY < 0 ? 0.25 : -0.25);
+        }}
       >
+        {/* 맨 아래: 하늘·산 배경. 확대/이동에 따라가지 않고 고정돼 있어야
+            섬만 커지면서 뒤 풍경은 그대로인 자연스러운 그림이 된다. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={SKY_BACKGROUND}
+          alt=""
+          aria-hidden="true"
+          draggable={false}
+          className="absolute inset-0 h-full w-full select-none object-cover"
+        />
+
         {/* 확대·이동은 이 겹에 한 번만 걸어 준다. 안쪽 좌표 계산이 단순해진다. */}
         <div
           className="absolute inset-0"
@@ -424,19 +459,35 @@ export default function Village({
 
         {/* 확대 / 이동 조작부 (지도 위에 고정) */}
         <div className="absolute bottom-3 right-3 z-40 flex flex-col items-center gap-1 rounded-3xl border-2 border-white bg-white/90 p-2 shadow-xl backdrop-blur">
-          <button type="button" onClick={() => panBy(0, 0.08)} aria-label="위로" className="h-8 w-8 rounded-xl bg-amber-50 font-black text-stone-500 hover:bg-amber-100">↑</button>
+          <button type="button" onClick={() => panBy(0, PAN_STEP)} aria-label="위로" className="h-8 w-8 rounded-xl bg-amber-50 font-black text-stone-500 hover:bg-amber-100">↑</button>
           <div className="flex gap-1">
-            <button type="button" onClick={() => panBy(0.08, 0)} aria-label="왼쪽으로" className="h-8 w-8 rounded-xl bg-amber-50 font-black text-stone-500 hover:bg-amber-100">←</button>
+            <button type="button" onClick={() => panBy(PAN_STEP, 0)} aria-label="왼쪽으로" className="h-8 w-8 rounded-xl bg-amber-50 font-black text-stone-500 hover:bg-amber-100">←</button>
             <button type="button" onClick={resetView} aria-label="처음 크기로" className="h-8 w-8 rounded-xl bg-rose-100 text-xs font-black text-rose-500 hover:bg-rose-200">◎</button>
-            <button type="button" onClick={() => panBy(-0.08, 0)} aria-label="오른쪽으로" className="h-8 w-8 rounded-xl bg-amber-50 font-black text-stone-500 hover:bg-amber-100">→</button>
+            <button type="button" onClick={() => panBy(-PAN_STEP, 0)} aria-label="오른쪽으로" className="h-8 w-8 rounded-xl bg-amber-50 font-black text-stone-500 hover:bg-amber-100">→</button>
           </div>
-          <button type="button" onClick={() => panBy(0, -0.08)} aria-label="아래로" className="h-8 w-8 rounded-xl bg-amber-50 font-black text-stone-500 hover:bg-amber-100">↓</button>
+          <button type="button" onClick={() => panBy(0, -PAN_STEP)} aria-label="아래로" className="h-8 w-8 rounded-xl bg-amber-50 font-black text-stone-500 hover:bg-amber-100">↓</button>
           <div className="mt-1 flex items-center gap-1">
-            <button type="button" onClick={() => zoomBy(-0.4)} aria-label="축소" className="h-8 w-8 rounded-xl bg-sky-50 text-lg font-black text-sky-600 hover:bg-sky-100">−</button>
+            <button
+              type="button"
+              onClick={() => zoomBy(-0.4)}
+              disabled={view.zoom <= MIN_ZOOM + 0.001}
+              aria-label="축소"
+              className="h-8 w-8 rounded-xl bg-sky-50 text-lg font-black text-sky-600 hover:bg-sky-100 disabled:opacity-30"
+            >
+              −
+            </button>
             <span className="w-9 text-center text-[11px] font-extrabold text-stone-500">
               {view.zoom.toFixed(1)}×
             </span>
-            <button type="button" onClick={() => zoomBy(0.4)} aria-label="확대" className="h-8 w-8 rounded-xl bg-sky-50 text-lg font-black text-sky-600 hover:bg-sky-100">+</button>
+            <button
+              type="button"
+              onClick={() => zoomBy(0.4)}
+              disabled={view.zoom >= MAX_ZOOM - 0.001}
+              aria-label="확대"
+              className="h-8 w-8 rounded-xl bg-sky-50 text-lg font-black text-sky-600 hover:bg-sky-100 disabled:opacity-30"
+            >
+              +
+            </button>
           </div>
         </div>
 
@@ -458,7 +509,7 @@ export default function Village({
       </div>
 
       <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-amber-50/95 px-4 py-2 text-xs font-bold text-stone-400">
-        <span>🐾 친구를 누르면 말을 걸고, 그다음 원하는 자리를 누르면 그곳으로 가요</span>
+        <span>🐾 친구를 누르면 말을 걸고, 그다음 원하는 자리를 누르면 그곳으로 가요 · 지도를 두 번 누르면 확대돼요</span>
         {cast.length > 0 && <span>· 오늘 나온 친구 {cast.length}마리</span>}
         {restingCount > 0 && <span>· {restingCount}마리는 집에서 쉬는 중</span>}
         <button

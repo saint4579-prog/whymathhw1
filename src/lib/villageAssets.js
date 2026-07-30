@@ -55,6 +55,9 @@ export const MAX_HOUSE_LEVEL = HOUSE_IDS.length;
 // 6단계부터 배경이 바뀐다.
 export const THEME_SWITCH_LEVEL = 6;
 
+// 맨 아래에 까는 하늘·산 배경. 섬 그림이 그 위에 얹힌다.
+export const SKY_BACKGROUND = driveImage('1Y8jEDuwezD1EGap5vM8EeD65ZEf6wTb-', 1600);
+
 // 앱 화면에 띄우는 '멍멍 마을' 입구 아이콘
 export const VILLAGE_ICON = driveImage('14vn12nYgNDpLflVH5bqez6TkYIsqjJA2', 400);
 
