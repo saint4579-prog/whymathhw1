@@ -23,6 +23,15 @@ export function clampAffinity(score) {
   return Math.min(AFFINITY_MAX, Math.max(AFFINITY_MIN, n));
 }
 
+/**
+ * 호감도를 0~1 비율로. 게이지 길이에 쓴다.
+ * -15(가장 서먹함)가 0, +30(가장 친함)이 1이다.
+ */
+export function affinityRatio(score) {
+  const n = clampAffinity(score);
+  return (n - AFFINITY_MIN) / (AFFINITY_MAX - AFFINITY_MIN);
+}
+
 /** 'friendly' | 'neutral' | 'hostile' */
 export function affinityTier(score) {
   const n = clampAffinity(score);
@@ -265,7 +274,23 @@ export function packHintFor(name) {
 export function pickEvent(name, random = Math.random) {
   const pack = packFor(name);
   const events = pack.events;
-  return events[Math.floor(random() * events.length) % events.length];
+  const event = events[Math.floor(random() * events.length) % events.length];
+  // 보기 순서를 섞는다.
+  //
+  // 데이터에는 읽기 쉽도록 +3 / 0 / -3 순으로 적어 뒀는데, 그대로 보여 주면
+  // 늘 1번이 정답이라 아이가 대사를 안 읽고 1번만 누르게 된다.
+  // 호감도 값은 보기마다 붙어 다니므로 순서를 바꿔도 채점은 그대로다.
+  return { ...event, choices: shuffle(event.choices, random) };
+}
+
+/** 원본을 건드리지 않고 순서만 섞어 새 배열로 돌려준다 (피셔–예이츠) */
+function shuffle(list, random = Math.random) {
+  const out = [...list];
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
 }
 
 /** 호감도 단계에 맞는 평소 대사 */

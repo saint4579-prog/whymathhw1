@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import CharacterMascot from './CharacterMascot';
+import PhotoProof from './PhotoProof';
 import { saveChecklistMarks, fetchChecklist } from '@/lib/api';
 import {
   CHECK_COLUMNS,
@@ -55,6 +56,10 @@ export default function ChecklistBoard({ hwangsoProblems = [], userName, onPoint
   const [savingCode, setSavingCode] = useState(null);
   const [notice, setNotice] = useState(null);
   const [earnedToday, setEarnedToday] = useState(0);
+  // 사진 인증 중인지. 사진을 찍어야 새 체크를 할 수 있다.
+  const [proofActive, setProofActive] = useState(false);
+  // 이번 사진으로 체크한 문항 수 (안내용)
+  const [proofCount, setProofCount] = useState(0);
 
   // 시트에 저장된 체크 상태를 불러온다. 실패해도 화면은 앱 채점 이력으로 채워진다.
   useEffect(() => {
@@ -96,6 +101,16 @@ export default function ChecklistBoard({ hwangsoProblems = [], userName, onPoint
       const before = checkMap[item.code] ?? deriveChecks(item.historyLogs);
       const after = toggleCheck(before, key, todayKey());
 
+      // 새로 체크하려면 사진이 있어야 한다.
+      // 잘못 누른 걸 푸는 것(체크 해제)은 사진 없이도 되게 둔다.
+      // 실수를 바로잡으려고 사진을 다시 찍게 하면 아이가 지쳐서 그냥 둬 버린다.
+      const isNewCheck = Boolean(after[key]) && !before[key];
+      if (isNewCheck && !proofActive) {
+        setNotice('먼저 푼 문제를 사진으로 찍어 주세요 📷');
+        return;
+      }
+      if (isNewCheck) setProofCount((prev) => prev + 1);
+
       // 화면은 즉시 바꾼다. 아이가 기다리지 않게.
       setCheckMap((prev) => ({ ...prev, [item.code]: after }));
       setSavingCode(item.code);
@@ -123,7 +138,7 @@ export default function ChecklistBoard({ hwangsoProblems = [], userName, onPoint
         setSavingCode(null);
       }
     },
-    [checkMap, userName, onPointsAwarded]
+    [checkMap, userName, onPointsAwarded, proofActive]
   );
 
   const toggleConcept = (code) => {
@@ -161,6 +176,22 @@ export default function ChecklistBoard({ hwangsoProblems = [], userName, onPoint
         ))}
       </div>
 
+      {/* 사진 인증 */}
+      <PhotoProof
+        active={proofActive}
+        checkedCount={proofCount}
+        onStart={() => {
+          setProofActive(true);
+          setProofCount(0);
+          setNotice(null);
+        }}
+        onEnd={() => {
+          setProofActive(false);
+          setNotice(proofCount > 0 ? `잘했어요! ${proofCount}문제 체크했어요 🐾` : null);
+          setProofCount(0);
+        }}
+      />
+
       {/* 진도 요약 */}
       <section className="rounded-[2rem] border-4 border-white bg-white p-4 shadow-xl shadow-amber-100/70">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -168,7 +199,7 @@ export default function ChecklistBoard({ hwangsoProblems = [], userName, onPoint
             <CharacterMascot name="fox" height={48} />
             <div>
               <p className="text-xs font-bold text-rose-400">
-                🐾 종이로 풀고, 여기에 체크만 하면 돼요
+                🐾 종이로 풀고, 사진을 찍은 뒤 체크해요
               </p>
               <h3 className="text-lg font-extrabold text-stone-700">
                 {activeUnit?.subject ?? ''} 체크리스트
@@ -287,6 +318,11 @@ export default function ChecklistBoard({ hwangsoProblems = [], userName, onPoint
                                   type="button"
                                   disabled={busy}
                                   onClick={() => handleToggle(item, col.key)}
+                                  title={
+                                    !proofActive && !checks[col.key]
+                                      ? '사진을 먼저 찍어 주세요'
+                                      : col.hint
+                                  }
                                   aria-label={`${item.label} ${col.label}`}
                                   aria-pressed={Boolean(checks[col.key])}
                                   className={`h-9 w-9 rounded-xl text-base font-black transition ${
@@ -296,7 +332,9 @@ export default function ChecklistBoard({ hwangsoProblems = [], userName, onPoint
                                         : col.key === 'done'
                                           ? 'bg-emerald-400 text-white'
                                           : 'bg-amber-300 text-amber-900'
-                                      : 'bg-amber-50 text-stone-300 hover:bg-amber-100'
+                                      : proofActive
+                                        ? 'bg-amber-50 text-stone-300 hover:bg-amber-100'
+                                        : 'bg-stone-50 text-stone-200'
                                   }`}
                                 >
                                   {checks[col.key] ? '✓' : ''}

@@ -751,6 +751,20 @@ export default function Home() {
     return response;
   };
 
+  // 로그아웃: 누가 쓰고 있는지만 지운다.
+  //
+  // 공부 기록·포인트·호감도는 이름별로 저장되고 시트에도 남아 있으므로,
+  // 같은 이름으로 다시 들어오면 그대로 이어서 쓸 수 있다.
+  // (여기서 기록까지 지우면 형제가 번갈아 쓸 때 서로의 기록이 날아간다)
+  const handleLogout = useCallback(() => {
+    try {
+      window.localStorage.removeItem(USER_INFO_KEY);
+    } catch {
+      // 저장소를 못 쓰는 환경이어도 화면 전환은 되어야 한다.
+    }
+    setUserInfo(null);
+  }, []);
+
   // 등록 여부 확인 전에는 아무것도 그리지 않아 깜빡임을 막는다.
   if (userInfo === undefined) return null;
 
@@ -766,6 +780,8 @@ export default function Home() {
         setActiveTab={setActiveTab}
         currentPoints={currentPoints}
         level={collection.level}
+        userName={userInfo?.name}
+        onLogout={handleLogout}
       />
       <div className="p-4 md:p-6">
         {loading && (

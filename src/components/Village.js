@@ -52,6 +52,7 @@ import {
   loadNextDialogueAt,
   saveNextDialogueAt,
   formatCooldown,
+  affinityRatio,
   loadHomeUntil,
   saveHomeUntil,
 } from '@/lib/villageDialogue';
@@ -562,6 +563,8 @@ export default function Village({
             if (actor.hidden) return null;
             const type = mbtiOf(actor.name);
             const isSelected = selected === actor.name;
+            const score = affinity[actor.name] ?? 0;
+            const tier = affinityTier(score);
             return (
               <button
                 key={actor.name}
@@ -588,9 +591,9 @@ export default function Village({
                     </span>
                   )}
                   {/* 호감도 단계 아이콘. 보통일 때는 굳이 띄우지 않는다. */}
-                  {!actor.npc && affinityTier(affinity[actor.name] ?? 0) !== 'neutral' && (
+                  {!actor.npc && tier !== 'neutral' && (
                     <span className="pointer-events-none absolute -top-2 -right-1 z-[52] text-sm drop-shadow">
-                      {TIER_INFO[affinityTier(affinity[actor.name] ?? 0)].icon}
+                      {TIER_INFO[tier].icon}
                     </span>
                   )}
                   {burst?.name === actor.name && <AffinityBurst delta={burst.delta} />}
@@ -638,6 +641,25 @@ export default function Village({
                     {actor.npc ? '🙋 ' : isAquatic(actor.name) ? '🌊 ' : ''}
                     {actor.name}
                   </span>
+                  {/* 이름 아래 호감도 게이지.
+                      숫자를 쓰면 아이가 대사보다 숫자를 먼저 보게 되고, 화면도 지저분해진다.
+                      2px짜리 얇은 막대로 '얼마나 친한지'만 색과 길이로 보여 준다.
+                      지윤이는 호감도를 받는 쪽이 아니라 주는 쪽이라 게이지가 없다. */}
+                  {!actor.npc && (
+                    <span
+                      aria-label={`${actor.name} 호감도 ${TIER_INFO[tier].label}`}
+                      className="mx-auto mt-[2px] block h-[2px] w-8 overflow-hidden rounded-full bg-black/15"
+                    >
+                      <span
+                        className="block h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${Math.max(6, affinityRatio(score) * 100)}%`,
+                          backgroundColor:
+                            tier === 'friendly' ? '#FB7185' : tier === 'hostile' ? '#94A3B8' : '#FBBF24',
+                        }}
+                      />
+                    </span>
+                  )}
                 </span>
               </button>
             );
