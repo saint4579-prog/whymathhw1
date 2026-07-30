@@ -345,3 +345,19 @@ export function formatCooldown(ms) {
   if (min <= 0) return `${sec}초`;
   return sec > 0 ? `${min}분 ${sec}초` : `${min}분`;
 }
+
+// 지윤이가 삐져서 집에 들어가 있는 시각.
+// 마을 화면을 나갔다 들어오면 캐릭터가 새로 배치되기 때문에,
+// 이 값을 저장해 두지 않으면 '나갔다 오기'로 벌을 피할 수 있다.
+const HOME_KEY = 'village-jiyoon-home';
+
+export function loadHomeUntil(userName) {
+  if (typeof window === 'undefined') return 0;
+  const raw = window.localStorage.getItem(`${HOME_KEY}-${userName}`);
+  return Number(raw) || 0;
+}
+
+export function saveHomeUntil(userName, at) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(`${HOME_KEY}-${userName}`, String(at));
+}

@@ -35,6 +35,7 @@ import {
   isAquatic,
   sendHome,
   comeOutside,
+  HOUSE_DOOR,
 } from '@/lib/villageMotion';
 import { mbtiOf, MBTI_TYPES, pickLine, pickGreeting } from '@/lib/villagePersona';
 import { activeNpcs, frameStyle, walkFrame, npcBoxStyle, npcAnchorTransform } from '@/lib/villageSprites';
@@ -51,6 +52,8 @@ import {
   loadNextDialogueAt,
   saveNextDialogueAt,
   formatCooldown,
+  loadHomeUntil,
+  saveHomeUntil,
 } from '@/lib/villageDialogue';
 
 const BUBBLE_MS = 4000;
@@ -159,16 +162,22 @@ export default function Village({
 
   useEffect(() => {
     const animals = cast.map((name, index) => spawnCharacter(name, index, cast.length));
-    const people = npcs.map((npc, index) =>
-      spawnCharacter(npc.name, index, npcs.length, Math.random, npc)
-    );
+    // 아직 삐져 있는 중이면 집 안에서 시작한다.
+    // (state가 아니라 저장값을 직접 읽는다. 이 effect가 쿨타임마다 다시 돌면
+    //  동물들이 전부 제자리로 순간이동해 버린다.)
+    const sulkingUntil = loadHomeUntil(userName);
+    const stillSulking = Date.now() < sulkingUntil;
+    const people = npcs.map((npc, index) => {
+      const actor = spawnCharacter(npc.name, index, npcs.length, Math.random, npc);
+      return stillSulking ? { ...actor, hidden: true, x: HOUSE_DOOR.x, y: HOUSE_DOOR.y } : actor;
+    });
     const next = [...animals, ...people];
     actorsRef.current = next;
     setActors(next);
     setSelected(null);
     // 오늘 말을 걸어올 친구 1~2마리를 고른다. (전부 말을 걸면 공부에 방해가 된다)
     setQuestTargets(pickQuestTargets(cast));
-  }, [cast, npcs]);
+  }, [cast, npcs, userName]);
 
   useEffect(() => {
     if (actorsRef.current.length === 0) return undefined;
@@ -211,10 +220,11 @@ export default function Village({
     if (someoneInside) {
       actorsRef.current = actorsRef.current.map((a) => (a.npc && a.hidden ? comeOutside(a) : a));
       setActors(actorsRef.current);
+      saveHomeUntil(userName, 0);
       setNotice('지윤이가 다시 나왔어요! 🐾');
     }
     setQuestTargets((prev) => (prev.length > 0 ? prev : pickQuestTargets(cast)));
-  }, [dialogueReady, cast]);
+  }, [dialogueReady, cast, userName]);
 
   // ── 확대 / 이동 ────────────────────────────────────────────────────
   // 확대한 만큼만 움직일 수 있게 막아, 지도가 화면 밖으로 빠져나가지 않게 한다.
@@ -342,6 +352,7 @@ export default function Village({
     if (applied.delta < 0) {
       actorsRef.current = actorsRef.current.map((a) => (a.npc ? sendHome(a) : a));
       setActors(actorsRef.current);
+      saveHomeUntil(userName, until);
       setNotice(`${name}가 서운해했어요. 지윤이가 집으로 들어갔어요 🏠`);
     }
   };
