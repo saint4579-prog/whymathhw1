@@ -275,7 +275,7 @@ export default function ProblemSolver({ queue, setQueue, index, setIndex, onGrad
       )}
 
       {/* 상단 정보 + 우측 툴바 */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <div className="mb-3 flex min-h-[44px] flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-semibold text-stone-500">
           {queueLabel && (
             <span className="mr-2 rounded-full bg-rose-100 px-3 py-0.5 text-xs font-bold text-rose-500">
@@ -284,7 +284,7 @@ export default function ProblemSolver({ queue, setQueue, index, setIndex, onGrad
           )}
           {index + 1} / {queue.length} · {problem.code}
           {isSolving ? (
-            <span className="ml-2 inline-block rounded-full bg-sky-100 px-3 py-1 text-xs font-extrabold text-sky-600">
+            <span className="ml-2 inline-block rounded-full bg-sky-100 px-3 py-1 text-xs font-extrabold text-sky-600" style={{ fontVariantNumeric: 'tabular-nums' }}>
               ⏱️ {formatMinSec(elapsedTimeSec)}
             </span>
           ) : (
