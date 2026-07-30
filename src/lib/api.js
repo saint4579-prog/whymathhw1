@@ -36,7 +36,16 @@ export async function fetchProblems() {
 
 // 특정 문제의 채점 결과와 아이가 캔버스에 작성한 풀이 이미지를 업데이트
 // Content-Type을 text/plain으로 보내야 Apps Script Web App에서 CORS preflight 없이 처리된다.
-export async function submitGrade(rowNumber, isCorrect, code, canvasImage, solveTimeSec, userName, workbook) {
+export async function submitGrade(
+  rowNumber,
+  isCorrect,
+  code,
+  canvasImage,
+  solveTimeSec,
+  userName,
+  workbook,
+  typedAnswer
+) {
   const res = await fetch(API_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -52,6 +61,9 @@ export async function submitGrade(rowNumber, isCorrect, code, canvasImage, solve
       userName: userName ?? getStoredUserName(),
       // 'mockExam'이면 모의고사문제목록 시트를 갱신한다 (기본값: 문제목록).
       workbook: workbook || undefined,
+      // 펜 대신 키보드로 답을 냈을 때 아이가 입력한 텍스트.
+      // 학습기록 G열에 남겨서, 나중에 "무슨 답을 썼다가 틀렸나"를 되짚어 볼 수 있게 한다.
+      typedAnswer: typedAnswer ? String(typedAnswer).slice(0, 200) : '',
     }),
   });
   if (!res.ok) {

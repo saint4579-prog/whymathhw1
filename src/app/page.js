@@ -111,6 +111,10 @@ export default function Home() {
   const [mockExamProblems, setMockExamProblems] = useState([]);
   // [황소 중2상 1차단평대비] 문제집. public/data/문항목록.csv 를 프론트에서 직접 파싱해 채운다.
   const [hwangsoProblems, setHwangsoProblems] = useState([]);
+  // 구글 시트가 내려준, 시트에 없는 문제집(황소 등)의 채점 이력. { 문제코드: [{date,isCorrect,...}] }
+  // CSV 로딩보다 시트 응답이 먼저 오기도 하고 나중에 오기도 해서, state가 아니라 ref로 들고
+  // 양쪽 중 나중에 도착한 쪽이 목록을 다시 조립하게 한다.
+  const hwangsoSheetLogsRef = useRef({});
   // 여러 개의 시험 대비 설정(배열). 월간 플래너에서 추가/수정/삭제하고, 달력에 표시된다.
   const [exams, setExams] = useState([]);
   // 시험 설정을 GAS(구글 시트)에서 불러오는 중인지 여부. (월간 플래너 로딩 표시용)
@@ -237,6 +241,28 @@ export default function Home() {
           : {}
       );
       setPointLogs(Array.isArray(root?.pointLogs) ? root.pointLogs : []);
+      // 황소처럼 시트에 문제 행이 없는 문제집의 채점 이력을 받아 둔다.
+      hwangsoSheetLogsRef.current =
+        root?.externalLogs && typeof root.externalLogs === 'object' ? root.externalLogs : {};
+      // 이미 CSV 목록이 그려진 뒤에 시트 응답이 왔다면, 여기서 이력을 덧입힌다.
+      setHwangsoProblems((prev) =>
+        prev.length === 0
+          ? prev
+          : prev.map((p) => {
+              const sheetLogs = Array.isArray(hwangsoSheetLogsRef.current[p.code])
+                ? hwangsoSheetLogsRef.current[p.code]
+                : [];
+              if (sheetLogs.length <= (p.historyLogs?.length ?? 0)) return p;
+              const last = sheetLogs[sheetLogs.length - 1];
+              return {
+                ...p,
+                historyLogs: sheetLogs,
+                reviewCount: sheetLogs.length,
+                isCorrect: last ? last.isCorrect : p.isCorrect,
+                submitted: true,
+              };
+            })
+      );
       writeLocalValue(POINT_HISTORY_KEY, mergedPointHistory);
       window.localStorage.setItem(CURRENT_POINTS_KEY, String(loadedPoints));
     } catch (e) {
@@ -268,18 +294,31 @@ export default function Home() {
     fetchHwangsoProblems()
       .then((list) => {
         if (cancelled) return;
-        // 이 학생의 과거 채점 기록(O/X)을 localStorage에서 읽어 각 문제에 붙인다.
+        // 과거 채점 기록을 두 곳에서 읽어 합친다.
+        //  - localStorage: 이 기기에서 푼 기록. O/△/X 세 단계가 그대로 남아 있다.
+        //  - 구글 시트(externalLogs): 어느 기기에서 풀었든 남는 기록. 단 △는 X로 저장된다.
+        // 둘 중 기록이 더 많은 쪽을 그 문제의 진짜 이력으로 본다.
+        // 그래서 다른 기기(아이패드 등)에서 푼 것도 이 기기에서 보이고,
+        // 이 기기에서 방금 푼 △ 표시도 시트 때문에 X로 뭉개지지 않는다.
         const records = loadHwangsoRecords(userInfo?.name);
         setHwangsoProblems(
           list.map((p) => {
-            const marks = Array.isArray(records[p.fileName]) ? records[p.fileName] : [];
+            const localMarks = Array.isArray(records[p.fileName]) ? records[p.fileName] : [];
+            const sheetLogs = Array.isArray(hwangsoSheetLogsRef.current[p.code])
+              ? hwangsoSheetLogsRef.current[p.code]
+              : [];
+            const useSheet = sheetLogs.length > localMarks.length;
+            const historyLogs = useSheet
+              ? sheetLogs
+              : localMarks.map((mark) => ({ isCorrect: mark }));
+            const last = historyLogs.length > 0 ? historyLogs[historyLogs.length - 1] : null;
             return {
               ...p,
-              historyLogs: marks.map((mark) => ({ isCorrect: mark })),
-              reviewCount: marks.length,
+              historyLogs,
+              reviewCount: historyLogs.length,
               // 상태 뱃지는 가장 최근 채점 결과를 따른다.
-              isCorrect: marks.length > 0 ? marks[marks.length - 1] : null,
-              submitted: marks.length > 0,
+              isCorrect: last ? last.isCorrect : null,
+              submitted: historyLogs.length > 0,
             };
           })
         );
@@ -374,7 +413,7 @@ export default function Home() {
 
   // 황소 채점: ①브라우저 O/△/X 기록 ②망각곡선 복습 스케줄 ③구글 시트 학습기록(정답여부/푼날짜)에 모두 남긴다.
   // 학습기록/복습은 O/X 기준이라 △는 X(다시 볼 것)로 매핑해 기록한다. (화면 뱃지는 △ 그대로 유지)
-  const handleGradeHwangso = async (problem, isCorrect, canvasImage, solveTimeSec) => {
+  const handleGradeHwangso = async (problem, isCorrect, canvasImage, solveTimeSec, typedAnswer = '') => {
     const gasMark = isCorrect === 'O' ? 'O' : 'X'; // 시트/복습용 O·X (△·X → X)
 
     // ① 브라우저 로컬 O/△/X 기록
@@ -405,7 +444,13 @@ export default function Home() {
         problem.code,
         canvasImage ?? null,
         solveTimeSec ?? 1,
-        userInfo?.name
+        userInfo?.name,
+        // 반드시 'hwangso'를 넘겨야 한다.
+        // 황소는 CSV 기반이라 시트에 대응하는 행이 없는데, 이 값을 빼먹으면 백엔드가
+        // 문제목록 시트의 rowNumber번째 행이라고 착각해 엉뚱한 문제의 제출답/정답여부를
+        // 덮어써 버린다. 이 값이 있으면 학습기록에만 남긴다.
+        'hwangso',
+        typedAnswer
       );
     } catch {
       // 시트 기록 실패는 무시 (다음 풀이 때 다시 시도)
@@ -468,7 +513,7 @@ export default function Home() {
   };
 
   // ProblemSolver에서 O/X 채점 시 호출: 구글 시트로 결과 전송 + 로컬 복습 스케줄 갱신 + 상태 갱신
-  const handleGrade = async (problem, isCorrect, canvasImage, solveTimeSec) => {
+  const handleGrade = async (problem, isCorrect, canvasImage, solveTimeSec, typedAnswer = '') => {
     // 현재 풀이 중인 문제집이 [영재원 대비_모의고사]면 모의고사문제목록 시트를 갱신하도록 알려준다.
     const isMockExam = solverWorkbook === 'mockExam';
     // code는 학습기록 B열 콘텐츠 코드에 필요하므로 현재 문제에서 직접 전달한다.
@@ -480,7 +525,9 @@ export default function Home() {
       canvasImage,
       solveTimeSec,
       userInfo?.name,
-      isMockExam ? 'mockExam' : undefined
+      isMockExam ? 'mockExam' : undefined,
+      // 펜 대신 키보드로 낸 답. 학습기록 G열에 남는다.
+      typedAnswer
     );
     const responseRoot = getPayloadRoot(response);
     const submittedUrl =

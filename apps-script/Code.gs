@@ -5,6 +5,8 @@ var POINT_LOG_SHEET_NAME = '포인트기록';
 var USER_SHEET_NAME = '사용자정보';
 // 스터디 플래너/시험 대비 설정/학원 숙제를 사용자별 JSON 한 덩어리로 저장하는 시트.
 var PLANNER_SHEET_NAME = '플래너';
+// 날짜별 하루 계획. 한 행 = 사용자 1명의 하루.
+var PLANNER_DAY_SHEET_NAME = '플래너일자';
 var PROBLEM_IMAGE_FOLDER_ID = '1QPpZq4iDvnVVaswFQd6YLgY2d4IEGbqG';
 var ANSWER_IMAGE_FOLDER_ID = '1YOtQiOrjbxDh3DNwgdwkA65C9bkbdhDr';
 var TIME_ZONE = 'Asia/Seoul';
@@ -60,28 +62,171 @@ function getOrCreateSheet(ss, name, headers) {
 // planner 블롭 = { goals, days, examConfig, academyHomework, ... } 형태의 자유 JSON.
 // ---------------------------------------------------------------------------
 
-function getPlannerForUser(ss, userName) {
-  var sheet = ss.getSheetByName(PLANNER_SHEET_NAME);
-  if (!sheet) return null;
+// 하루치 계획은 '플래너일자' 시트에 한 행씩 따로 저장한다.
+//
+// 왜 나눴나: 예전에는 { goals, days:{ '2026-07-27': {...}, ... } } 전체를 '플래너' 시트의
+// 셀 하나에 넣었다. 하루에 1.4KB씩 쌓이는데 시트 셀 한도가 5만 자여서, 한 달쯤 쓰면
+// 저장이 갑자기 멈춘다. 체크 한 번 할 때마다 지금까지의 전 기간을 왕복으로 주고받는
+// 문제도 있었다.
+//
+// 이제 '플래너'에는 목표(goals)·시험·학원숙제처럼 날짜와 무관한 것만 남고,
+// 날짜별 계획은 '플래너일자'에 하루=한 행으로 들어간다. 하루치는 절대 한도에 닿지 않고,
+// 저장할 때 오늘 행 하나만 쓰므로 요청도 훨씬 작아진다.
+function getPlannerDaySheet(ss) {
+  return getOrCreateSheet(ss, PLANNER_DAY_SHEET_NAME, ['사용자', '날짜', '계획JSON', '수정일시']);
+}
+
+/**
+ * 날짜별 계획을 '플래너일자'에 반영한다.
+ * 이미 있는 날짜는 그 행만 덮어쓰고, 없는 날짜는 새 행으로 붙인다.
+ * (넘어오지 않은 날짜는 건드리지 않는다. 그래서 오늘 것만 보내도 지난 기록이 지워지지 않는다.)
+ */
+function writePlannerDays(ss, userName, days, now) {
+  var dateKeys = [];
+  for (var k in days) {
+    if (Object.prototype.hasOwnProperty.call(days, k)) dateKeys.push(k);
+  }
+  if (dateKeys.length === 0) return;
+
+  var sheet = getPlannerDaySheet(ss);
   var data = sheet.getDataRange().getValues();
-  var name = String(userName || '').trim();
+
+  // 이미 있는 (사용자, 날짜) → 행 번호
+  var rowByDate = {};
   for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0] || '').trim() === name) {
-      try {
-        return JSON.parse(data[i][1] || 'null');
-      } catch (e) {
-        return null;
+    if (String(data[i][0] || '').trim() !== userName) continue;
+    var existing = formatDateKey(data[i][1]);
+    if (existing) rowByDate[existing] = i + 1;
+  }
+
+  var newRows = [];
+  for (var d = 0; d < dateKeys.length; d++) {
+    var dateKey = dateKeys[d];
+    var json = JSON.stringify(days[dateKey] || {});
+    // 하루치가 셀 한도에 닿는 일은 사실상 없지만, 만약을 대비해 잘라 낸다.
+    if (json.length > 45000) json = JSON.stringify({ error: 'too_large', date: dateKey });
+    if (rowByDate[dateKey]) {
+      sheet.getRange(rowByDate[dateKey], 3, 1, 2).setValues([[json, now]]);
+    } else {
+      newRows.push([userName, dateKey, json, now]);
+    }
+  }
+  // 새 날짜들은 한 번에 붙여서 호출 횟수를 줄인다.
+  if (newRows.length > 0) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, 4).setValues(newRows);
+  }
+}
+
+/**
+ * [1회 실행] 예전 구조에서 새 구조로 옮긴다.
+ *
+ * 실행 방법: 앱스 스크립트 편집기 함수 목록에서 '플래너_구조이전'을 고르고 ▶ 실행.
+ * '플래너' 셀 하나에 뭉쳐 있던 days를 '플래너일자'의 날짜별 행으로 쪼개고,
+ * 원래 셀의 days는 빈 객체로 비운다. 두 번 실행해도 안전하다.
+ */
+function 플래너_구조이전() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(PLANNER_SHEET_NAME);
+  if (!sheet) return '플래너 시트가 없습니다.';
+
+  var data = sheet.getDataRange().getValues();
+  var now = formatDateTime(new Date());
+  var moved = 0;
+  var report = [];
+
+  for (var i = 1; i < data.length; i++) {
+    var name = String(data[i][0] || '').trim();
+    if (!name) continue;
+    var blob;
+    try {
+      blob = JSON.parse(data[i][1] || 'null');
+    } catch (e) {
+      report.push(name + ': JSON을 읽을 수 없어 건너뜀');
+      continue;
+    }
+    if (!blob || !blob.days) continue;
+
+    var count = 0;
+    for (var k in blob.days) {
+      if (Object.prototype.hasOwnProperty.call(blob.days, k)) count++;
+    }
+    if (count === 0) continue;
+
+    writePlannerDays(ss, name, blob.days, now);
+    blob.days = {};
+    sheet.getRange(i + 1, 2).setValue(JSON.stringify(blob));
+    sheet.getRange(i + 1, 3).setValue(now);
+    moved += count;
+    report.push(name + ': ' + count + '일치 이전');
+  }
+
+  var message = '옮긴 날짜 수: ' + moved + '\n' + report.join('\n');
+  Logger.log(message);
+  return message;
+}
+
+function getPlannerForUser(ss, userName) {
+  var name = String(userName || '').trim();
+  var base = null;
+
+  var sheet = ss.getSheetByName(PLANNER_SHEET_NAME);
+  if (sheet) {
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0] || '').trim() === name) {
+        try {
+          base = JSON.parse(data[i][1] || 'null');
+        } catch (e) {
+          base = null;
+        }
+        break;
       }
     }
   }
-  return null;
+  if (!base) base = {};
+
+  // 날짜별 계획을 모아 붙인다.
+  // base.days에 값이 남아 있으면 아직 옮기지 않은 예전 데이터이므로 바탕으로 깔고,
+  // 같은 날짜가 '플래너일자'에도 있으면 그쪽(새 구조)을 우선한다.
+  var days = base.days && typeof base.days === 'object' ? base.days : {};
+  var daySheet = ss.getSheetByName(PLANNER_DAY_SHEET_NAME);
+  if (daySheet) {
+    var dayData = daySheet.getDataRange().getValues();
+    for (var d = 1; d < dayData.length; d++) {
+      if (String(dayData[d][0] || '').trim() !== name) continue;
+      var dateKey = formatDateKey(dayData[d][1]);
+      if (!dateKey) continue;
+      try {
+        days[dateKey] = JSON.parse(dayData[d][2] || 'null') || days[dateKey];
+      } catch (e2) {
+        // 깨진 행은 건너뛴다. 나머지 날짜는 정상적으로 열린다.
+      }
+    }
+  }
+  base.days = days;
+  return base;
 }
 
 function savePlannerForUser(ss, userName, planner) {
   var sheet = getOrCreateSheet(ss, PLANNER_SHEET_NAME, ['사용자', '플래너JSON', '수정일시']);
   var name = String(userName || '').trim();
-  var json = JSON.stringify(planner || {});
+  var incoming = planner || {};
   var now = formatDateTime(new Date());
+
+  // ① 날짜별 계획은 '플래너일자'로 넘긴다.
+  var days = incoming.days && typeof incoming.days === 'object' ? incoming.days : {};
+  writePlannerDays(ss, name, days, now);
+
+  // ② '플래너' 시트에는 날짜와 무관한 것만 남긴다. (days는 빈 객체로 비워 둔다)
+  var base = {};
+  for (var key in incoming) {
+    if (!Object.prototype.hasOwnProperty.call(incoming, key)) continue;
+    if (key === 'days') continue;
+    base[key] = incoming[key];
+  }
+  base.days = {};
+
+  var json = JSON.stringify(base);
   var data = sheet.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][0] || '').trim() === name) {
@@ -382,13 +527,28 @@ function doGet(e) {
       }
     }
 
+    // 시트에 없는 문제집(황소처럼 CSV로 관리되는 것들)의 채점 기록.
+    // 위에서 이미 학습기록 전체를 problemLogs로 모아 두었으니, 그중 문제목록/모의고사문제목록에
+    // 없는 코드만 골라 내려보낸다. 프론트엔드가 CSV로 만든 문제에 이 기록을 붙이면
+    // 기기를 바꿔도 O/X와 복습 이력이 그대로 따라온다.
+    var sheetCodes = {};
+    for (var sc = 0; sc < problems.length; sc++) sheetCodes[problems[sc].code] = true;
+    for (var mc = 0; mc < mockExamProblems.length; mc++) sheetCodes[mockExamProblems[mc].code] = true;
+    var externalLogs = {};
+    for (var logCode in problemLogs) {
+      if (!Object.prototype.hasOwnProperty.call(problemLogs, logCode)) continue;
+      if (sheetCodes[logCode]) continue;
+      externalLogs[logCode] = problemLogs[logCode];
+    }
+
     return jsonResponse({
       status: 'success',
       problems: problems,
       mockExamProblems: mockExamProblems,
       dailyStats: dailyStats,
       currentPoints: getCurrentPoints(ss, targetUser),
-      pointLogs: pointLogs
+      pointLogs: pointLogs,
+      externalLogs: externalLogs
     });
   } catch (error) {
     return jsonResponse({ status: 'error', message: String(error) });
@@ -543,12 +703,20 @@ function doPost(e) {
     // 모의고사문제목록은 D열이 해설 이미지 URL이라 제출한 손글씨를 덮어쓰면 안 되므로,
     // 정답여부(E열)만 기록하고 제출 이미지는 학습기록(historyLogs)에만 남긴다.
     var isMockExam = params.workbook === 'mockExam';
+    // [황소 중2상 1차단평대비]는 문제 데이터가 시트가 아니라 프로젝트의 CSV
+    // (public/data/문항목록.csv)에 있다. 그래서 갱신할 시트 행이 없고,
+    // 학습기록에만 남긴다. 포인트는 학습기록을 세어 계산하므로 이것만으로 충분하다.
+    var isCsvWorkbook = params.workbook === 'hwangso';
     try {
-      var problemSheet = ss.getSheetByName(isMockExam ? MOCK_EXAM_SHEET_NAME : PROBLEM_SHEET_NAME);
-      var rowNumber = Math.round(Number(params.rowNumber) || 0);
-      if (problemSheet && rowNumber >= 2 && rowNumber <= problemSheet.getMaxRows()) {
-        if (!isMockExam && answerUrl) problemSheet.getRange(rowNumber, 4).setValue(answerUrl);
-        problemSheet.getRange(rowNumber, 5).setValue(isCorrect);
+      if (isCsvWorkbook) {
+        // 갱신할 시트 행이 없으므로 이 단계를 건너뛴다.
+      } else {
+        var problemSheet = ss.getSheetByName(isMockExam ? MOCK_EXAM_SHEET_NAME : PROBLEM_SHEET_NAME);
+        var rowNumber = Math.round(Number(params.rowNumber) || 0);
+        if (problemSheet && rowNumber >= 2 && rowNumber <= problemSheet.getMaxRows()) {
+          if (!isMockExam && answerUrl) problemSheet.getRange(rowNumber, 4).setValue(answerUrl);
+          problemSheet.getRange(rowNumber, 5).setValue(isCorrect);
+        }
       }
     } catch (problemUpdateError) {
       warnings.push('문제목록 갱신 실패: ' + String(problemUpdateError));
@@ -557,10 +725,15 @@ function doPost(e) {
     var studySheet = getOrCreateSheet(
       ss,
       STUDY_LOG_SHEET_NAME,
-      ['풀이 일시', '콘텐츠 코드', '정답여부', '풀이 이미지 URL', '학습시간(초)', '학생 이름']
+      ['풀이 일시', '콘텐츠 코드', '정답여부', '풀이 이미지 URL', '학습시간(초)', '학생 이름', '타이핑 답']
     );
     if (studySheet.getRange(1, 6).getValue() === '') {
       studySheet.getRange(1, 6).setValue('학생 이름').setFontWeight('bold');
+    }
+    // G열(타이핑 답)은 나중에 생긴 열이라, 예전에 만들어진 시트에는 머리글이 없다.
+    // 처음 한 번만 채워 넣는다. (기존 데이터는 건드리지 않는다)
+    if (studySheet.getRange(1, 7).getValue() === '') {
+      studySheet.getRange(1, 7).setValue('타이핑 답').setFontWeight('bold');
     }
 
     var studiedAt = formatDateTime(new Date());
@@ -570,7 +743,9 @@ function doPost(e) {
       isCorrect,
       answerUrl,
       solveTimeSec,
-      userName
+      userName,
+      // 펜 대신 키보드로 낸 답. 손글씨로만 풀었으면 빈 값이다.
+      String(params.typedAnswer || '').slice(0, 200)
     ]);
 
     var pointsEarned = pointsForAnswer(isCorrect);

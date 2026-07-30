@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ProblemSolverCanvas from './ProblemSolverCanvas';
+import TypedAnswerField, { TypedAnswerVerdict } from './TypedAnswerField';
 import ImageLightbox from './ImageLightbox';
 import { toViewableImageUrl } from '@/lib/api';
 import { buildHintResultMessage, prepareGeminiHint } from '@/lib/geminiPrompt';
@@ -78,6 +79,12 @@ export default function ProblemSolver({ queue, setQueue, index, setIndex, onGrad
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
   const [isCelebrationOpen, setIsCelebrationOpen] = useState(false);
   const [hasCanvasContent, setHasCanvasContent] = useState(false);
+  // 문제코드 -> 아이가 타이핑한 답. 풀이 단계에서 모아 두고 채점 단계에서 보여 준다.
+  const [typedAnswers, setTypedAnswers] = useState({});
+  const setTypedAnswer = (key, value) => {
+    if (!key) return;
+    setTypedAnswers((prev) => ({ ...prev, [key]: value }));
+  };
   const [penColor, setPenColor] = useState('#1e293b');
   const [penTool, setPenTool] = useState('pen');
 
@@ -181,7 +188,7 @@ export default function ProblemSolver({ queue, setQueue, index, setIndex, onGrad
     const solveTimeSec = problemKey ? solveTimesRef.current[problemKey] ?? 1 : 1;
     setSubmitting(true);
     try {
-      await onGrade(problem, isCorrect, canvasImage, solveTimeSec);
+      await onGrade(problem, isCorrect, canvasImage, solveTimeSec, typedAnswers[problemKey] ?? '');
       if (isLastInQueue) {
         setIsCelebrationOpen(true);
       } else {
@@ -350,6 +357,21 @@ export default function ProblemSolver({ queue, setQueue, index, setIndex, onGrad
             showTools={isSolving}
           />
         </div>
+        {/* 펜이 말을 안 들을 때를 위한 타이핑 답 입력.
+            와이수학 문제집은 시트에 정답 텍스트가 없어 자동채점은 되지 않고,
+            채점 단계에서 아이가 적은 답을 다시 보여 주는 역할만 한다. */}
+        {isSolving ? (
+          <TypedAnswerField
+            value={typedAnswers[problemKey] ?? ''}
+            onChange={(value) => setTypedAnswer(problemKey, value)}
+            disabled={submitting}
+          />
+        ) : (
+          <TypedAnswerVerdict
+            typed={typedAnswers[problemKey] ?? ''}
+            correctAnswer={problem?.answer ?? ''}
+          />
+        )}
         <div className="min-h-16 shrink-0">
           {isSolving ? (
             <button

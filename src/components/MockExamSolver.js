@@ -110,6 +110,12 @@ export default function MockExamSolver({ queue, setQueue, index, setIndex, onGra
   const [submitting, setSubmitting] = useState(false);
   const [elapsedTimeSec, setElapsedTimeSec] = useState(0);
   const [hasCanvasContent, setHasCanvasContent] = useState(false);
+  // 문제코드 -> 아이가 타이핑한 답. 풀이 단계에서 모아 두고 채점 단계에서 보여 준다.
+  const [typedAnswers, setTypedAnswers] = useState({});
+  const setTypedAnswer = (key, value) => {
+    if (!key) return;
+    setTypedAnswers((prev) => ({ ...prev, [key]: value }));
+  };
   const [hintLevel, setHintLevel] = useState(0);
   const [isCelebrationOpen, setIsCelebrationOpen] = useState(false);
   const [imageFitMode, setImageFitMode] = useState('contain');
@@ -248,7 +254,7 @@ export default function MockExamSolver({ queue, setQueue, index, setIndex, onGra
     const solveTimeSec = problemKey ? solveTimesRef.current[problemKey] ?? 1 : 1;
     setSubmitting(true);
     try {
-      await onGrade(problem, isCorrect, canvasImage, solveTimeSec);
+      await onGrade(problem, isCorrect, canvasImage, solveTimeSec, typedAnswers[problemKey] ?? '');
       if (isLastInQueue) {
         setIsCelebrationOpen(true);
       } else {
@@ -359,6 +365,12 @@ export default function MockExamSolver({ queue, setQueue, index, setIndex, onGra
               disabled={submitting}
             />
           </div>
+          {/* 펜이 말을 안 들을 때를 위한 타이핑 답 입력. 채점은 다음 단계에서 한다. */}
+          <TypedAnswerField
+            value={typedAnswers[problemKey] ?? ''}
+            onChange={(value) => setTypedAnswer(problemKey, value)}
+            disabled={submitting}
+          />
           <button
             type="button"
             onClick={goToNext}
@@ -400,6 +412,12 @@ export default function MockExamSolver({ queue, setQueue, index, setIndex, onGra
               </span>
             </section>
           </div>
+
+          {/* 아이가 타이핑으로 낸 답. 모의고사는 정답이 이미지라 자동채점은 하지 않고 보여만 준다. */}
+          <TypedAnswerVerdict
+            typed={typedAnswers[problemKey] ?? ''}
+            correctAnswer={problem?.answer ?? ''}
+          />
 
           {/* 정답 + 해설(힌트로 단계적 공개) */}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

@@ -228,7 +228,7 @@ export default function HwangsoSolver({ queue, setQueue, index, setIndex, onGrad
     const solveTimeSec = problemKey ? solveTimesRef.current[problemKey] ?? 1 : 1;
     setSubmitting(true);
     try {
-      await onGrade(problem, mark, canvasImage, solveTimeSec);
+      await onGrade(problem, mark, canvasImage, solveTimeSec, typedAnswers[problemKey] ?? '');
       if (isLastInQueue) {
         setIsCelebrationOpen(true);
       } else {
