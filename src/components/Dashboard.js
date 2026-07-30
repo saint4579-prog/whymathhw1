@@ -8,8 +8,6 @@ import ChecklistBoard from './ChecklistBoard';
 import { hwangsoConceptList, HWANGSO_UNITS, unitLabel } from '@/lib/hwangso';
 import { isSolved, extractPageNumber } from '@/lib/problemUtils';
 import { buildHintResultMessage, prepareGeminiHint } from '@/lib/geminiPrompt';
-import { CHARACTERS } from '@/lib/characters';
-import CharacterMascot from './CharacterMascot';
 
 const WORKBOOKS = [
   { id: 'yi', label: '와이수학-대수-공통수학1' },
@@ -19,7 +17,7 @@ const WORKBOOKS = [
 
 function WorkbookTabs({ activeWorkbook, onWorkbookChange }) {
   return (
-    <div className="mb-4 flex flex-wrap justify-center gap-2">
+    <div className="flex flex-wrap justify-center gap-2">
       {WORKBOOKS.map((wb) => (
         <button
           key={wb.id}
@@ -38,25 +36,29 @@ function WorkbookTabs({ activeWorkbook, onWorkbookChange }) {
   );
 }
 
-function SummaryCard({ label, value, character }) {
-  const theme = character ? CHARACTERS[character] : null;
+/**
+ * 요약 숫자 3개를 한 줄짜리 알약으로 보여 준다.
+ *
+ * 예전에는 큰 카드 3장이 화면 위쪽을 통째로 차지했다. 이 숫자들은 가끔 확인하는 값이지
+ * 늘 크게 봐야 하는 값이 아니어서, 문제 목록이 화면에 더 많이 들어오도록 줄였다.
+ */
+function StatChips({ total, solved, correct }) {
+  const items = [
+    { label: '전체', value: total, cls: 'bg-white text-amber-700' },
+    { label: '완료', value: solved, cls: 'bg-white text-emerald-600' },
+    { label: '정답', value: correct, cls: 'bg-white text-rose-500' },
+  ];
   return (
-    <div
-      className={`relative flex min-h-[96px] flex-col items-center justify-center overflow-hidden rounded-3xl border-2 bg-white p-4 text-center shadow-lg ${
-        theme ? `${theme.ring} ${theme.glow}` : 'border-rose-100 shadow-amber-100/60'
-      }`}
-    >
-      {/* 캐릭터는 글자를 가리지 않도록 모서리에 옅은 워터마크로 깔고, 글자는 칸 중앙에 둔다. */}
-      {character && (
-        <CharacterMascot
-          name={character}
-          height={40}
-          animate="none"
-          className="pointer-events-none absolute -bottom-2 -right-2 opacity-20"
-        />
-      )}
-      <p className="relative z-10 mb-1 text-xs font-semibold text-amber-500">{label}</p>
-      <p className="relative z-10 text-2xl font-extrabold text-stone-700">{value}</p>
+    <div className="flex items-center gap-1.5">
+      {items.map((it) => (
+        <span
+          key={it.label}
+          className={`flex items-baseline gap-1 rounded-full border-2 border-amber-100 px-3 py-1 shadow-sm ${it.cls}`}
+        >
+          <span className="text-[11px] font-bold text-stone-400">{it.label}</span>
+          <span className="text-sm font-black">{Number(it.value).toLocaleString()}</span>
+        </span>
+      ))}
     </div>
   );
 }
@@ -256,11 +258,9 @@ export default function Dashboard({
     const mockCorrectCount = mockExamProblems.filter((p) => p.isCorrect === 'O').length;
     return (
       <div className="mx-auto max-w-6xl">
-        <WorkbookTabs activeWorkbook={activeWorkbook} onWorkbookChange={onWorkbookChange} />
-        <div className="mb-4 grid grid-cols-3 gap-3">
-          <SummaryCard label="전체 문제" value={mockTotal} character="elephant" />
-          <SummaryCard label="풀이 완료" value={mockSolvedCount} character="chick" />
-          <SummaryCard label="정답 수" value={mockCorrectCount} character="fox" />
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <WorkbookTabs activeWorkbook={activeWorkbook} onWorkbookChange={onWorkbookChange} />
+          <StatChips total={mockTotal} solved={mockSolvedCount} correct={mockCorrectCount} />
         </div>
         <MockExamBoard
           problems={mockExamProblems}
@@ -277,15 +277,15 @@ export default function Dashboard({
     const hwangsoCorrectCount = hwangsoProblems.filter((p) => p.isCorrect === 'O').length;
     return (
       <div className="mx-auto max-w-6xl">
-        <WorkbookTabs activeWorkbook={activeWorkbook} onWorkbookChange={onWorkbookChange} />
-        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-stretch">
-          {/* 좌측: 폭을 줄인 요약 카드 3개 */}
-          <div className="grid grid-cols-3 gap-3 lg:w-[340px] lg:shrink-0">
-            <SummaryCard label="전체 문제" value={hwangsoTotal} character="elephant" />
-            <SummaryCard label="풀이 완료" value={hwangsoSolvedCount} character="chick" />
-            <SummaryCard label="정답 수" value={hwangsoCorrectCount} character="fox" />
-          </div>
-          {/* 우측: 상세 통계 패널 */}
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <WorkbookTabs activeWorkbook={activeWorkbook} onWorkbookChange={onWorkbookChange} />
+          <StatChips
+            total={hwangsoTotal}
+            solved={hwangsoSolvedCount}
+            correct={hwangsoCorrectCount}
+          />
+        </div>
+        <div className="mb-4">
           <HwangsoStatsPanel problems={hwangsoProblems} />
         </div>
         {/* [문제 목록] / [체크리스트] 전환.
@@ -331,74 +331,35 @@ export default function Dashboard({
   return (
     <div className="mx-auto max-w-6xl">
       <div className="sticky top-[var(--app-header-height)] z-20 -mx-4 mb-4 space-y-3 bg-gradient-to-b from-amber-50 via-amber-50/95 to-amber-50/80 px-4 pb-3 pt-1 backdrop-blur md:-mx-6 md:px-6">
-        <WorkbookTabs activeWorkbook={activeWorkbook} onWorkbookChange={onWorkbookChange} />
-        <div className="grid grid-cols-3 gap-3">
-          <SummaryCard label="전체 문제" value={total} character="elephant" />
-          <SummaryCard label="풀이 완료" value={solvedCount} character="chick" />
-          <SummaryCard label="정답 수" value={correctCount} character="fox" />
+        {/* 첫째 줄: 문제집 고르기 + 요약 숫자.
+            큰 카드 3장이 한 줄을 통째로 먹고 있었는데, 숫자 3개를 보자고
+            화면 높이를 그만큼 쓸 이유가 없어서 작은 알약으로 줄여 옆에 붙였다. */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <WorkbookTabs activeWorkbook={activeWorkbook} onWorkbookChange={onWorkbookChange} />
+          <StatChips total={total} solved={solvedCount} correct={correctCount} />
         </div>
 
-        <div className="rounded-3xl border-2 border-rose-100 bg-white p-3 shadow-lg shadow-amber-100/60">
-          <p className="mb-2 px-1 text-xs font-bold text-amber-600">🐾 쪽수 범위로 콕 찍어 선택하기</p>
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-amber-500">시작 쪽수</span>
-              <input
-                type="number"
-                inputMode="numeric"
-                value={startPage}
-                onChange={(e) => setStartPage(e.target.value)}
-                placeholder="1"
-                className="w-20 rounded-full border-2 border-amber-100 px-4 py-2 text-sm text-stone-600 focus:border-rose-300 focus:outline-none"
-              />
-            </label>
-            <span className="text-amber-400">~</span>
-            <label className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-amber-500">끝 쪽수</span>
-              <input
-                type="number"
-                inputMode="numeric"
-                value={endPage}
-                onChange={(e) => setEndPage(e.target.value)}
-                placeholder="5"
-                className="w-20 rounded-full border-2 border-amber-100 px-4 py-2 text-sm text-stone-600 focus:border-rose-300 focus:outline-none"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={handleApplyRange}
-              className="rounded-full bg-rose-400 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-rose-500"
-            >
-              🐶 선택 적용
-            </button>
-            <button
-              type="button"
-              onClick={handleClearRange}
-              className="rounded-full bg-amber-100 px-4 py-2 text-sm font-bold text-amber-700 hover:bg-amber-200"
-            >
-              해당 범위 해제
-            </button>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 rounded-3xl border-2 border-rose-100 bg-white p-3 shadow-lg shadow-amber-100/60">
-          <label className="relative min-w-[220px] flex-1">
+        {/* 둘째 줄: 검색 · 상태 · 쪽수 범위를 한 칸에 모았다. */}
+        <div className="flex flex-wrap items-center gap-2 rounded-3xl border-2 border-rose-100 bg-white p-2 shadow-lg shadow-amber-100/60">
+          <label className="relative min-w-[180px] flex-1">
             <span className="sr-only">문제 검색</span>
-            <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2">🔎</span>
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm">
+              🔎
+            </span>
             <input
               type="search"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="파일명, 문제 번호, 쪽수로 검색"
-              className="w-full rounded-full border-2 border-amber-100 py-2 pl-11 pr-4 text-sm text-stone-600 outline-none placeholder:text-stone-300 focus:border-rose-300"
+              placeholder="파일명, 번호, 쪽수로 검색"
+              className="w-full rounded-full border-2 border-amber-100 py-1.5 pl-9 pr-3 text-sm text-stone-600 outline-none placeholder:text-stone-300 focus:border-rose-300"
             />
           </label>
-          <label className="flex items-center gap-2 text-xs font-bold text-amber-600">
-            상태
+          <label className="flex items-center gap-1 text-xs font-bold text-amber-600">
+            <span className="sr-only sm:not-sr-only">상태</span>
             <select
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value)}
-              className="rounded-full border-2 border-amber-100 bg-white px-4 py-2 text-sm font-bold text-stone-600 outline-none focus:border-rose-300"
+              className="rounded-full border-2 border-amber-100 bg-white px-3 py-1.5 text-sm font-bold text-stone-600 outline-none focus:border-rose-300"
             >
               <option value="all">전체</option>
               <option value="unsolved">미풀이</option>
@@ -407,8 +368,47 @@ export default function Dashboard({
               <option value="wrong">오답 X</option>
             </select>
           </label>
-          <span className="rounded-full bg-rose-50 px-3 py-2 text-xs font-bold text-rose-500">
-            {filteredProblems.length}개 찾았어요
+
+          {/* 쪽수 범위 선택. 세로로 한 칸 차지하던 것을 같은 줄로 옮겼다. */}
+          <span className="flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1">
+            <span className="text-xs font-bold text-amber-600">🐾 쪽수</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              aria-label="시작 쪽수"
+              value={startPage}
+              onChange={(e) => setStartPage(e.target.value)}
+              placeholder="1"
+              className="w-14 rounded-full border-2 border-amber-100 px-2 py-1 text-center text-sm text-stone-600 focus:border-rose-300 focus:outline-none"
+            />
+            <span className="text-amber-400">~</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              aria-label="끝 쪽수"
+              value={endPage}
+              onChange={(e) => setEndPage(e.target.value)}
+              placeholder="5"
+              className="w-14 rounded-full border-2 border-amber-100 px-2 py-1 text-center text-sm text-stone-600 focus:border-rose-300 focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={handleApplyRange}
+              className="rounded-full bg-rose-400 px-3 py-1 text-xs font-bold text-white shadow-sm hover:bg-rose-500"
+            >
+              선택
+            </button>
+            <button
+              type="button"
+              onClick={handleClearRange}
+              className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-700 hover:bg-amber-200"
+            >
+              해제
+            </button>
+          </span>
+
+          <span className="rounded-full bg-rose-50 px-2.5 py-1.5 text-xs font-bold text-rose-500">
+            {filteredProblems.length}개
           </span>
           {(searchQuery || statusFilter !== 'all') && (
             <button
