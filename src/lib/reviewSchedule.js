@@ -9,36 +9,52 @@
 //   - 체크리스트에서 체크한 날짜도 그대로 복습 기준이 된다
 // localStorage는 시트 기록이 아직 없을 때만 쓰는 예비 수단으로 남겨 둔다.
 
-const STORAGE_KEY = 'mathReview.schedule.v1';
+// 이름 없이 한 칸에 저장하면 같은 브라우저를 쓰는 다른 아이의 복습 기록이 섞인다.
+// 아이 이름을 붙여 나눠 담는다. (시트가 원본이고 이건 예비 수단이라 옮겨오지 않아도 된다)
+const STORAGE_BASE = 'mathReview.schedule.v1';
+
+function scheduleKey(userName) {
+  return `${STORAGE_BASE}:${String(userName ?? '').trim() || 'guest'}`;
+}
+
+/** 이름 없이 저장하던 시절의 값. 남겨 두면 다른 아이에게도 보인다. */
+export function clearLegacyScheduleKey() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(STORAGE_BASE);
+  } catch {
+    // 저장소를 못 쓰는 환경이면 넘어간다.
+  }
+}
 const REVIEW_INTERVAL_DAYS = [1, 3, 7, 14, 30];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function loadSchedule() {
+function loadSchedule(userName) {
   if (typeof window === 'undefined') return {};
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(scheduleKey(userName));
     return raw ? JSON.parse(raw) : {};
   } catch {
     return {};
   }
 }
 
-function saveSchedule(schedule) {
+function saveSchedule(schedule, userName) {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(schedule));
+    window.localStorage.setItem(scheduleKey(userName), JSON.stringify(schedule));
   } catch {
     // 저장 실패(용량 초과 등)는 복습 기능에만 영향을 주므로 조용히 무시한다.
   }
 }
 
 // 채점 결과를 이 기기에도 기록해 둔다. (시트 저장이 실패한 경우의 예비 수단)
-export function recordAttempt(rowNumber, isCorrect) {
-  const schedule = loadSchedule();
+export function recordAttempt(rowNumber, isCorrect, userName) {
+  const schedule = loadSchedule(userName);
   const prevStage = schedule[rowNumber]?.stage ?? -1;
   const nextStage = isCorrect === 'O' ? Math.min(prevStage + 1, REVIEW_INTERVAL_DAYS.length - 1) : 0;
   schedule[rowNumber] = { lastAttemptAt: new Date().toISOString(), stage: nextStage };
-  saveSchedule(schedule);
+  saveSchedule(schedule, userName);
 }
 
 function parseDate(value) {
@@ -61,7 +77,7 @@ export function getReviewState(problem, now = Date.now()) {
 
   if (logs.length === 0) {
     // 시트 기록이 없으면 이 기기의 예전 기록을 본다.
-    const entry = loadSchedule()[problem?.rowNumber];
+    const entry = loadSchedule(problem?.userName)[problem?.rowNumber];
     const graded = problem?.isCorrect === 'O' || problem?.isCorrect === 'X';
     if (!entry && !graded) {
       return {

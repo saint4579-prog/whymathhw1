@@ -26,13 +26,36 @@ import { getCollectionState } from '@/lib/levels';
 import { CHARACTERS } from '@/lib/characters';
 import { VILLAGE_ICON, clampLevel, MAX_HOUSE_LEVEL } from '@/lib/villageAssets';
 import { sortProblemsByPage, isSolved } from '@/lib/problemUtils';
-import { recordAttempt } from '@/lib/reviewSchedule';
+import { recordAttempt, clearLegacyScheduleKey } from '@/lib/reviewSchedule';
 
 const POINT_HISTORY_KEY = 'dog-math-point-history';
-const CURRENT_POINTS_KEY = 'dog-math-current-points';
 const USER_INFO_KEY = 'userInfo';
+
+// 아이마다 따로 담아 두어야 하는 값들.
+//
+// 예전에는 이름 없이 한 칸에만 저장했다. 그래서 같은 브라우저에서 다른 아이디로
+// 들어가면 앞사람의 집 단계·포인트가 그대로 보였다. (시트를 비워도 남아 있었다)
+// 이제 키 뒤에 이름을 붙여 서로 섞이지 않게 한다.
+const CURRENT_POINTS_BASE = 'dog-math-current-points';
 // 마지막으로 축하 모달을 보여준 레벨. 여기에 저장된 값보다 레벨이 오르면 레벨업 모달을 띄운다.
-const LEVEL_SEEN_KEY = 'dog-math-level-seen';
+const LEVEL_SEEN_BASE = 'dog-math-level-seen';
+const HOUSE_LEVEL_BASE = 'village-house-level';
+
+/** 'dog-math-current-points' + '오지윤' → 'dog-math-current-points:오지윤' */
+function userKey(base, userName) {
+  return `${base}:${String(userName ?? '').trim() || 'guest'}`;
+}
+
+// 이름 없이 저장하던 시절의 값. 남아 있으면 새 아이디에게도 계속 보이므로 한 번 지운다.
+// 지워도 손해가 없다 — 포인트·집 단계·레벨은 모두 시트에서 다시 받아 온다.
+const LEGACY_KEYS = [CURRENT_POINTS_BASE, LEVEL_SEEN_BASE, HOUSE_LEVEL_BASE];
+function clearLegacyKeys() {
+  try {
+    LEGACY_KEYS.forEach((key) => window.localStorage.removeItem(key));
+  } catch {
+    // 저장소를 못 쓰는 환경이면 그냥 넘어간다.
+  }
+}
 
 function readLocalArray(key) {
   try {
@@ -194,7 +217,7 @@ export default function Home() {
     if (!userInfo || loading) return;
     let seen = null;
     try {
-      const raw = window.localStorage.getItem(LEVEL_SEEN_KEY);
+      const raw = window.localStorage.getItem(userKey(LEVEL_SEEN_BASE, userInfo?.name));
       if (raw != null && raw !== '') seen = Number(raw);
     } catch {
       seen = null;
@@ -203,7 +226,7 @@ export default function Home() {
     if (seen == null || Number.isNaN(seen)) {
       // 이 브라우저에서 처음 확인하는 순간: 지금 레벨을 기준선으로만 저장한다.
       try {
-        window.localStorage.setItem(LEVEL_SEEN_KEY, String(collection.level));
+        window.localStorage.setItem(userKey(LEVEL_SEEN_BASE, userInfo?.name), String(collection.level));
       } catch {
         // 저장 실패는 무시 (다음 상승 때 다시 시도)
       }
@@ -217,7 +240,7 @@ export default function Home() {
         .map((entry) => entry.name);
       setLevelUp({ level: collection.level, names: newNames });
       try {
-        window.localStorage.setItem(LEVEL_SEEN_KEY, String(collection.level));
+        window.localStorage.setItem(userKey(LEVEL_SEEN_BASE, userInfo?.name), String(collection.level));
       } catch {
         // 저장 실패는 무시
       }
@@ -239,7 +262,7 @@ export default function Home() {
         root?.pointHistory ?? root?.pointRecords ?? root?.rewardHistory ?? [];
       const localPointHistory = readLocalArray(POINT_HISTORY_KEY);
       const mergedPointHistory = mergeEntries(remotePointHistory, localPointHistory);
-      const savedPointValue = window.localStorage.getItem(CURRENT_POINTS_KEY);
+      const savedPointValue = window.localStorage.getItem(userKey(CURRENT_POINTS_BASE, userInfo?.name));
       const historyBalance = Math.max(
         0,
         mergedPointHistory.reduce((sum, entry) => sum + getPointDelta(entry), 0)
@@ -283,7 +306,7 @@ export default function Home() {
             })
       );
       writeLocalValue(POINT_HISTORY_KEY, mergedPointHistory);
-      window.localStorage.setItem(CURRENT_POINTS_KEY, String(loadedPoints));
+      window.localStorage.setItem(userKey(CURRENT_POINTS_BASE, userInfo?.name), String(loadedPoints));
     } catch (e) {
       setError(e.message);
     } finally {
@@ -294,6 +317,8 @@ export default function Home() {
   // 최초 접속 시 1회만 사용자 등록을 받는다: localStorage에 userInfo가 있으면 바로 메인 화면으로 진입한다.
   useEffect(() => {
     try {
+      clearLegacyKeys();
+      clearLegacyScheduleKey();
       const raw = window.localStorage.getItem(USER_INFO_KEY);
       setUserInfo(raw ? JSON.parse(raw) : null);
     } catch {
@@ -355,7 +380,7 @@ export default function Home() {
     if (!userInfo) return undefined;
     let cancelled = false;
     try {
-      const local = window.localStorage.getItem('village-house-level');
+      const local = window.localStorage.getItem(userKey(HOUSE_LEVEL_BASE, userInfo?.name));
       if (local) setHouseLevel(clampLevel(local));
     } catch {
       // 저장소가 막혀 있으면 1단계로 시작한다.
@@ -473,7 +498,7 @@ export default function Home() {
     );
 
     // ② 망각곡선 복습 스케줄: 오늘 풀었으니 내일부터 복습 대상으로 뜬다.
-    recordAttempt(problem.rowNumber, gasMark);
+    recordAttempt(problem.rowNumber, gasMark, userInfo?.name);
 
     // ③ 구글 시트 학습기록에 남긴다. (콘텐츠 코드=파일명, 정답여부, 푼 날짜, 학생 이름)
     //    실패해도 로컬 기록/복습은 유지되도록 조용히 무시한다.
@@ -601,7 +626,7 @@ export default function Home() {
 
     // 망각곡선 복습 스케줄은 [와이수학-대수-공통수학1] 문제집 전용이다. 모의고사는 시트가 달라
     // rowNumber가 겹칠 수 있으므로 여기서는 스케줄에 기록하지 않는다.
-    if (!isMockExam) recordAttempt(problem.rowNumber, isCorrect);
+    if (!isMockExam) recordAttempt(problem.rowNumber, isCorrect, userInfo?.name);
     const applyGradeUpdate = (p) =>
       p.rowNumber === problem.rowNumber
         ? {
@@ -651,11 +676,11 @@ export default function Home() {
 
     if (responseBalance != null) {
       setCurrentPoints(responseBalance);
-      window.localStorage.setItem(CURRENT_POINTS_KEY, String(responseBalance));
+      window.localStorage.setItem(userKey(CURRENT_POINTS_BASE, userInfo?.name), String(responseBalance));
     } else if (pointsEarned > 0) {
       setCurrentPoints((prev) => {
         const next = prev + pointsEarned;
-        window.localStorage.setItem(CURRENT_POINTS_KEY, String(next));
+        window.localStorage.setItem(userKey(CURRENT_POINTS_BASE, userInfo?.name), String(next));
         return next;
       });
     }
@@ -696,7 +721,7 @@ export default function Home() {
     });
     setCurrentPoints((prev) => {
       const next = prev + earned;
-      window.localStorage.setItem(CURRENT_POINTS_KEY, String(next));
+      window.localStorage.setItem(userKey(CURRENT_POINTS_BASE, userInfo?.name), String(next));
       return next;
     });
   };
@@ -712,7 +737,7 @@ export default function Home() {
 
     setHouseLevel(level);
     try {
-      window.localStorage.setItem('village-house-level', String(level));
+      window.localStorage.setItem(userKey(HOUSE_LEVEL_BASE, userInfo?.name), String(level));
     } catch {
       // 저장 실패해도 이번 화면에서는 올라간 단계가 보인다.
     }
@@ -741,7 +766,7 @@ export default function Home() {
     };
 
     setCurrentPoints(nextBalance);
-    window.localStorage.setItem(CURRENT_POINTS_KEY, String(nextBalance));
+    window.localStorage.setItem(userKey(CURRENT_POINTS_BASE, userInfo?.name), String(nextBalance));
     setPointHistory((prev) => {
       const next = mergeEntries(pointEntry, prev);
       writeLocalValue(POINT_HISTORY_KEY, next);
