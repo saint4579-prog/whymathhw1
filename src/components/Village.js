@@ -60,6 +60,14 @@ import {
 } from '@/lib/villageDialogue';
 
 const BUBBLE_MS = 4000;
+
+// 국어 어휘 퀴즈가 나올 확률. 동물을 누를 때마다 굴린다.
+// 5분짜리 대화 쿨타임과는 별개다. 300개를 외우려면 자주 만나야 한다.
+const QUIZ_CHANCE = 0.7;
+// 같은 동물에게 다시 문제를 받기까지의 짧은 간격.
+// 연타했을 때 문제가 줄줄이 뜨는 것만 막는 용도다.
+// 다른 동물을 누르면 곧바로 낼 수 있다.
+const QUIZ_COOLDOWN_MS = 12 * 1000;
 // 0.5배까지 줄일 수 있다. 줄이면 섬이 작아지고 둘레에 하늘·산 배경이 넓게 보인다.
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;
@@ -117,6 +125,10 @@ export default function Village({
   // 시트에서 받아 온 국어 어휘와 공부 명언
   const [vocab, setVocab] = useState([]);
   const [quotes, setQuotes] = useState([]);
+  // 방금 퀴즈를 낸 동물 → 다시 낼 수 있는 시각.
+  // 5분 대화 쿨타임과는 아무 상관이 없다. 같은 동물을 연타했을 때
+  // 문제가 줄줄이 뜨는 것만 막는 짧은 간격이다.
+  const quizReadyRef = useRef({});
   // 호감도 변화 효과를 띄울 대상. { name, delta }
   const [burst, setBurst] = useState(null);
   // 이번 방문에 '!'를 달고 있는 친구들 (1~2마리)
@@ -328,16 +340,30 @@ export default function Village({
       return;
     }
 
-    // '!'가 떠 있고 마을 전체 쿨타임도 지났으면 3지 선다 대화를 시작한다.
+    // '!'가 떠 있고 마을 전체 쿨타임도 지났으면 성격 대화(3지 선다)를 시작한다.
+    // 이건 5분에 한 번뿐인, 호감도가 크게 움직이는 대화다.
     const ready = questTargets.includes(actor.name) && Date.now() >= nextDialogueAt;
     if (ready && !actor.npc) {
-      // 어휘가 있으면 절반쯤은 국어 퀴즈를 낸다.
-      // 매번 퀴즈면 아이가 말 거는 걸 시험처럼 느끼고, 아예 없으면 공부가 안 된다.
-      const quiz =
-        vocab.length >= 3 && Math.random() < 0.5 ? buildVocabQuiz(actor.name, vocab) : null;
-      setDialogue({ name: actor.name, event: quiz ?? pickEvent(actor.name) });
+      setDialogue({ name: actor.name, event: pickEvent(actor.name), kind: 'talk' });
       setSelected(null);
       return;
+    }
+
+    // 국어 퀴즈는 5분 쿨타임과 상관없이 아무 때나 나온다.
+    // '!'가 없는 동물을 눌러도, 대화를 막 끝낸 직후여도 낼 수 있다.
+    // 어휘 300개를 자주 만나야 외워지기 때문에 문턱을 두지 않았다.
+    const quizReady = Date.now() >= (quizReadyRef.current[actor.name] ?? 0);
+    if (!actor.npc && vocab.length >= 3 && quizReady && Math.random() < QUIZ_CHANCE) {
+      const quiz = buildVocabQuiz(actor.name, vocab);
+      if (quiz) {
+        quizReadyRef.current = {
+          ...quizReadyRef.current,
+          [actor.name]: Date.now() + QUIZ_COOLDOWN_MS,
+        };
+        setDialogue({ name: actor.name, event: quiz, kind: 'quiz' });
+        setSelected(null);
+        return;
+      }
     }
 
     // 그 외에는 평소 대사. 호감도 단계에 따라 말투가 달라진다.
@@ -369,25 +395,33 @@ export default function Village({
       saveAffinity(userName, next);
       return next;
     });
+    if (applied.delta !== 0) {
+      setBurst({ name, delta: applied.delta });
+      setTimeout(() => setBurst(null), 1400);
+    }
+
+    // ── 어휘 퀴즈 ──
+    // 5분 쿨타임을 쓰지도, 새로 걸지도 않는다. 퀴즈는 계속 풀 수 있어야 한다.
+    if (dialogue.kind === 'quiz') {
+      if (applied.choice?.correct) {
+        saveVocabResult(userName, dialogue.event.rowNumber, true);
+        setNotice(`'${dialogue.event.word}' 정답! 📖 호감도 +${applied.delta}`);
+      } else {
+        setNotice(`'${dialogue.event.word}' — 다음엔 맞힐 수 있어요 📖`);
+      }
+      return;
+    }
+
+    // ── 성격 대화 ──
     // 다음 대화까지 마을 전체가 5분 쉰다.
     const until = Date.now() + DIALOGUE_COOLDOWN_MS;
     setNextDialogueAt(until);
     saveNextDialogueAt(userName, until);
     setQuestTargets([]);
 
-    if (applied.delta !== 0) {
-      setBurst({ name, delta: applied.delta });
-      setTimeout(() => setBurst(null), 1400);
-    }
-
-    // 어휘 퀴즈였다면 맞힌 횟수를 시트에 올린다. (틀린 것은 기록하지 않는다)
-    if (dialogue.event?.quiz && applied.choice?.correct) {
-      saveVocabResult(userName, dialogue.event.rowNumber, true);
-      setNotice(`'${dialogue.event.word}' 정답! 📖`);
-    }
-
     // 호감도를 잃었으면 지윤이가 속상해서 집으로 들어간다.
-    // 다음 대화가 열릴 때까지 안 나온다.
+    // 퀴즈를 틀렸을 때는 들어가지 않는다. 퀴즈는 자주 나오는데 한 번 틀릴 때마다
+    // 지윤이가 사라지면, 아이가 무서워서 퀴즈를 아예 안 누르게 된다.
     if (applied.delta < 0) {
       actorsRef.current = actorsRef.current.map((a) => (a.npc ? sendHome(a) : a));
       setActors(actorsRef.current);
