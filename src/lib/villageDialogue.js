@@ -252,9 +252,13 @@ const MBTI_PACK = {
   ESTJ: 'serious', ISTJ: 'serious',
 };
 
+/** 이 동물이 어떤 성향 묶음에 속하는지. ('playful' | 'aloof' | ...) */
+export function packKeyFor(name) {
+  return MBTI_PACK[mbtiOf(name)] ?? 'playful';
+}
+
 export function packFor(name) {
-  const key = MBTI_PACK[mbtiOf(name)] ?? 'playful';
-  return PACKS[key];
+  return PACKS[packKeyFor(name)];
 }
 
 export function packNameFor(name) {

@@ -272,3 +272,93 @@ export async function saveChecklistMarks(userName, entries = []) {
     earnedToday: Number(root?.earnedToday) || 0,
   };
 }
+
+// ---------------------------------------------------------------------------
+// 마을 어휘 퀴즈 · 공부 명언
+// ---------------------------------------------------------------------------
+
+// 어휘 300개와 명언은 한 번 받아 두면 마을에 있는 동안 바뀔 일이 없다.
+// 마을에 드나들 때마다 다시 받으면 그때마다 몇 초씩 멈춰서, 하루 동안 담아 둔다.
+const VOCAB_CACHE_KEY = 'village-vocab-cache';
+const QUOTE_CACHE_KEY = 'village-quote-cache';
+const CACHE_HOURS = 12;
+
+function readCache(key) {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const fresh = Date.now() - (Number(parsed?.at) || 0) < CACHE_HOURS * 60 * 60 * 1000;
+    return fresh && Array.isArray(parsed?.list) ? parsed.list : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(key, list) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify({ at: Date.now(), list }));
+  } catch {
+    // 저장소가 꽉 찼어도 화면은 그대로 돌아가야 한다.
+  }
+}
+
+/** [필수 국어 어휘] 300개. 실패하면 빈 배열 — 퀴즈만 안 나오고 마을은 멀쩡하다. */
+export async function fetchVocab() {
+  const cached = readCache(VOCAB_CACHE_KEY);
+  if (cached) return cached;
+  try {
+    const res = await fetch(`${API_URL}?type=GET_VOCAB`, { cache: 'no-store' });
+    const data = await parseApiResponse(res, '어휘를 불러오지 못했습니다.');
+    const root = data?.data && !Array.isArray(data.data) ? data.data : data;
+    const list = Array.isArray(root?.vocab) ? root.vocab : [];
+    if (list.length > 0) writeCache(VOCAB_CACHE_KEY, list);
+    return list;
+  } catch {
+    return [];
+  }
+}
+
+/** [공부명대사] B열의 명언들. 실패하면 빈 배열 — 평소 혼잣말만 나온다. */
+export async function fetchQuotes() {
+  const cached = readCache(QUOTE_CACHE_KEY);
+  if (cached) return cached;
+  try {
+    const res = await fetch(`${API_URL}?type=GET_QUOTES`, { cache: 'no-store' });
+    const data = await parseApiResponse(res, '명언을 불러오지 못했습니다.');
+    const root = data?.data && !Array.isArray(data.data) ? data.data : data;
+    const list = Array.isArray(root?.quotes) ? root.quotes : [];
+    if (list.length > 0) writeCache(QUOTE_CACHE_KEY, list);
+    return list;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 퀴즈를 맞혔을 때 시트의 맞힌 횟수를 올린다.
+ * 저장이 실패해도 아이 화면에서는 이미 정답 처리가 끝났으므로 조용히 넘어간다.
+ */
+export async function saveVocabResult(userName, rowNumber, correct) {
+  if (!correct) return { correctCount: 0 };
+  try {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      redirect: 'follow',
+      body: JSON.stringify({
+        type: 'VOCAB_RESULT',
+        userName: userName ?? getStoredUserName(),
+        rowNumber,
+        correct: true,
+      }),
+    });
+    const data = await parseApiResponse(res, '어휘 기록 저장에 실패했습니다.');
+    const root = data?.data && !Array.isArray(data.data) ? data.data : data;
+    return { correctCount: Number(root?.correctCount) || 0 };
+  } catch {
+    return { correctCount: 0 };
+  }
+}

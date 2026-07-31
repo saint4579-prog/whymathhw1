@@ -9,6 +9,9 @@ var PLANNER_SHEET_NAME = '플래너';
 var PLANNER_DAY_SHEET_NAME = '플래너일자';
 // 종이 학습 체크리스트. 한 행 = 사용자 1명의 문항 1개.
 var CHECKLIST_SHEET_NAME = '체크리스트';
+// 마을 동물이 내는 국어 어휘 퀴즈와, 돌아다니며 말하는 공부 명언
+var VOCAB_SHEET_NAME = '필수 국어 어휘';
+var QUOTE_SHEET_NAME = '공부명대사';
 
 // 체크리스트로 받는 포인트. 직접 풀고 채점하는 것(정답 20P)보다 낮게 둔다.
 // 종이로 풀고 체크만 하는 것이라 앱이 실제 풀이를 확인할 수 없기 때문이다.
@@ -614,6 +617,106 @@ function setupMockExamSheet() {
 /**
  * 문제 목록과 현재 사용자의 학습 통계, 포인트 및 풀이 이력을 반환합니다.
  */
+
+// ---------------------------------------------------------------------------
+// 마을 어휘 퀴즈 · 공부 명언
+// ---------------------------------------------------------------------------
+
+/**
+ * [필수 국어 어휘] 탭을 읽는다.
+ *   A=번호  B=단어(한자)  C=뜻  D=분야  E=맞힌횟수(총합)  F=사용자별(JSON)
+ * 1행은 머리글이라 건너뛴다.
+ *
+ * rowNumber를 함께 돌려주는 이유: 아이가 문제를 맞혔을 때 그 줄을 바로 찾아
+ * 횟수를 올리기 위해서다. 단어로 다시 찾으면 같은 단어가 두 번 있을 때 어긋난다.
+ */
+function doGetVocab(ss) {
+  var sheet = ss.getSheetByName(VOCAB_SHEET_NAME);
+  if (!sheet) return { status: 'success', vocab: [] };
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { status: 'success', vocab: [] };
+
+  var values = sheet.getRange(2, 1, lastRow - 1, 6).getValues();
+  var out = [];
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    var word = String(row[1] || '').trim();
+    var meaning = String(row[2] || '').trim();
+    if (!word || !meaning) continue;
+    out.push({
+      rowNumber: i + 2,
+      no: row[0],
+      word: word,
+      meaning: meaning,
+      field: String(row[3] || '').trim(),
+      correctCount: Number(row[4]) || 0
+    });
+  }
+  return { status: 'success', vocab: out };
+}
+
+/**
+ * [공부명대사] 탭을 읽는다. A열은 비어 있고 B열에 명언이 있다.
+ */
+function doGetQuotes(ss) {
+  var sheet = ss.getSheetByName(QUOTE_SHEET_NAME);
+  if (!sheet) return { status: 'success', quotes: [] };
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { status: 'success', quotes: [] };
+
+  var values = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
+  var out = [];
+  for (var i = 0; i < values.length; i++) {
+    var line = String(values[i][0] || '').trim();
+    if (line) out.push(line);
+  }
+  return { status: 'success', quotes: out };
+}
+
+/**
+ * 어휘 퀴즈를 맞혔을 때 횟수를 올린다.
+ *
+ * E열에는 사람이 눈으로 읽을 총합을 숫자로 두고,
+ * F열에는 누가 몇 번 맞혔는지를 {"지윤":3} 형태로 둔다.
+ * (E열만 두면 형제가 같이 쓸 때 누구 기록인지 알 수 없고,
+ *  F열만 두면 시트를 열었을 때 한눈에 안 들어온다)
+ *
+ * 틀린 경우에는 아무것도 쓰지 않는다. 호감도만 깎기로 했기 때문이다.
+ */
+function doSaveVocabResult(ss, userName, rowNumber, correct) {
+  var sheet = ss.getSheetByName(VOCAB_SHEET_NAME);
+  if (!sheet) throw new Error('[' + VOCAB_SHEET_NAME + '] 탭을 찾을 수 없습니다.');
+
+  var row = Number(rowNumber) || 0;
+  if (row < 2 || row > sheet.getLastRow()) {
+    throw new Error('어휘 줄 번호가 올바르지 않습니다: ' + rowNumber);
+  }
+  if (!correct) {
+    return { status: 'success', correctCount: Number(sheet.getRange(row, 5).getValue()) || 0 };
+  }
+
+  var name = String(userName || '').trim() || '이름없음';
+
+  var byUser = {};
+  var raw = String(sheet.getRange(row, 6).getValue() || '').trim();
+  if (raw) {
+    try { byUser = JSON.parse(raw) || {}; } catch (err) { byUser = {}; }
+  }
+  byUser[name] = (Number(byUser[name]) || 0) + 1;
+
+  var total = 0;
+  for (var key in byUser) {
+    if (byUser.hasOwnProperty(key)) total += Number(byUser[key]) || 0;
+  }
+
+  sheet.getRange(row, 5).setValue(total);
+  sheet.getRange(row, 6).setValue(JSON.stringify(byUser));
+
+  return { status: 'success', correctCount: total, byUser: byUser };
+}
+
 function doGet(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -624,6 +727,14 @@ function doGet(e) {
     // 스터디 플래너/시험 대비 설정 조회. (문제 목록 집계보다 먼저 빠르게 응답)
     if (e && e.parameter && e.parameter.type === 'GET_CHECKLIST') {
       return jsonResponse(doGetChecklist(ss, targetUser));
+    }
+
+    if (e && e.parameter && e.parameter.type === 'GET_VOCAB') {
+      return jsonResponse(doGetVocab(ss));
+    }
+
+    if (e && e.parameter && e.parameter.type === 'GET_QUOTES') {
+      return jsonResponse(doGetQuotes(ss));
     }
 
     if (e && e.parameter && e.parameter.type === 'GET_PLANNER') {
@@ -826,6 +937,12 @@ function doPost(e) {
     }
 
     // 스터디 플래너/시험 대비 설정/학원 숙제 통째로 저장.
+    if (params.type === 'VOCAB_RESULT') {
+      return jsonResponse(
+        doSaveVocabResult(ss, params.userName, params.rowNumber, params.correct === true)
+      );
+    }
+
     if (params.type === 'SAVE_CHECKLIST') {
       return handleSaveChecklist(ss, params);
     }

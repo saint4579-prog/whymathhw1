@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CHARACTERS } from '@/lib/characters';
+import { fetchVocab, fetchQuotes, saveVocabResult } from '@/lib/api';
+import { normalizeVocab, buildVocabQuiz, quoteLineFor } from '@/lib/villageQuiz';
 import {
   backgroundFor,
   SKY_BACKGROUND,
@@ -112,6 +114,9 @@ export default function Village({
   const [affinity, setAffinity] = useState({});
   // 지금 열려 있는 대화. { name, event }
   const [dialogue, setDialogue] = useState(null);
+  // 시트에서 받아 온 국어 어휘와 공부 명언
+  const [vocab, setVocab] = useState([]);
+  const [quotes, setQuotes] = useState([]);
   // 호감도 변화 효과를 띄울 대상. { name, delta }
   const [burst, setBurst] = useState(null);
   // 이번 방문에 '!'를 달고 있는 친구들 (1~2마리)
@@ -149,6 +154,21 @@ export default function Village({
     setAffinity(loadAffinity(userName));
     setNextDialogueAt(loadNextDialogueAt(userName));
   }, [userName]);
+
+  // 어휘·명언을 받아 온다. 못 받아 와도 마을은 평소대로 돌아간다.
+  // (퀴즈만 안 나오고, 말풍선은 원래 혼잣말만 뜬다)
+  useEffect(() => {
+    let alive = true;
+    fetchVocab().then((rows) => {
+      if (alive) setVocab(normalizeVocab(rows));
+    });
+    fetchQuotes().then((list) => {
+      if (alive) setQuotes(Array.isArray(list) ? list.filter(Boolean) : []);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // 남은 시간 표시를 위해 1초마다 현재 시각을 갱신한다.
   useEffect(() => {
@@ -311,15 +331,27 @@ export default function Village({
     // '!'가 떠 있고 마을 전체 쿨타임도 지났으면 3지 선다 대화를 시작한다.
     const ready = questTargets.includes(actor.name) && Date.now() >= nextDialogueAt;
     if (ready && !actor.npc) {
-      setDialogue({ name: actor.name, event: pickEvent(actor.name) });
+      // 어휘가 있으면 절반쯤은 국어 퀴즈를 낸다.
+      // 매번 퀴즈면 아이가 말 거는 걸 시험처럼 느끼고, 아예 없으면 공부가 안 된다.
+      const quiz =
+        vocab.length >= 3 && Math.random() < 0.5 ? buildVocabQuiz(actor.name, vocab) : null;
+      setDialogue({ name: actor.name, event: quiz ?? pickEvent(actor.name) });
       setSelected(null);
       return;
     }
 
     // 그 외에는 평소 대사. 호감도 단계에 따라 말투가 달라진다.
-    const line = actor.npc?.lines?.length
-      ? actor.npc.lines[Math.floor(Math.random() * actor.npc.lines.length)]
-      : idleLineFor(actor.name, affinity[actor.name] ?? 0);
+    // 공부 명언이 있으면 셋에 하나꼴로 섞는다. 전부 명언으로 채우면
+    // 동물마다의 성격이 사라져서, 가끔 튀어나올 때가 더 마음에 남는다.
+    const quoteLine =
+      quotes.length > 0 && !actor.npc && Math.random() < 0.34
+        ? quoteLineFor(actor.name, quotes[Math.floor(Math.random() * quotes.length)])
+        : null;
+    const line =
+      quoteLine ??
+      (actor.npc?.lines?.length
+        ? actor.npc.lines[Math.floor(Math.random() * actor.npc.lines.length)]
+        : idleLineFor(actor.name, affinity[actor.name] ?? 0));
     const next = actorsRef.current.map((a, i) =>
       i === index ? { ...a, line, lineUntil: Date.now() + BUBBLE_MS } : a
     );
@@ -346,6 +378,12 @@ export default function Village({
     if (applied.delta !== 0) {
       setBurst({ name, delta: applied.delta });
       setTimeout(() => setBurst(null), 1400);
+    }
+
+    // 어휘 퀴즈였다면 맞힌 횟수를 시트에 올린다. (틀린 것은 기록하지 않는다)
+    if (dialogue.event?.quiz && applied.choice?.correct) {
+      saveVocabResult(userName, dialogue.event.rowNumber, true);
+      setNotice(`'${dialogue.event.word}' 정답! 📖`);
     }
 
     // 호감도를 잃었으면 지윤이가 속상해서 집으로 들어간다.

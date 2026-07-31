@@ -41,7 +41,10 @@ export default function DialogueBox({ animalName, event, affinity = 0, onDone, o
     if (result) return;
     const applied = applyChoice(affinity, choice);
     setResult(applied);
-    onDone?.(applied);
+    // 고른 보기 자체도 함께 넘긴다.
+    // 어휘 퀴즈는 '맞혔는지'를 알아야 시트에 횟수를 올릴 수 있는데,
+    // 호감도 변화(delta)만으로는 퀴즈인지 평범한 대화인지 구분할 수 없다.
+    onDone?.({ ...applied, choice });
   };
 
   return (
