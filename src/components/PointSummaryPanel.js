@@ -117,10 +117,14 @@ export default function PointSummaryPanel({ userName }) {
         </li>
       </ul>
 
-      {summary.repeatsIgnored > 0 && (
+      {(summary.repeatsRewarded > 0 || summary.sameDaySkipped > 0) && (
         <p className="mt-3 rounded-2xl bg-stone-50 px-4 py-2 text-xs font-bold text-stone-400">
-          🔁 같은 문제를 다시 푼 기록 {summary.repeatsIgnored}건은 포인트에 넣지 않았어요. 문제 하나당
-          처음 채점한 것만 인정해요. (다시 푼 것도 기록과 복습에는 그대로 남아요)
+          {summary.repeatsRewarded > 0 && (
+            <>🔁 다른 날 다시 푼 {summary.repeatsRewarded}건도 포인트를 받았어요. </>
+          )}
+          {summary.sameDaySkipped > 0 && (
+            <>같은 날 다시 푼 {summary.sameDaySkipped}건은 빼고 셌어요 — 한 문제는 하루에 한 번이에요.</>
+          )}
         </p>
       )}
 

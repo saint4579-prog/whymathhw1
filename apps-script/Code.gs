@@ -265,9 +265,11 @@ function savePlannerForUser(ss, userName, planner) {
 // 다른 쪽이 어긋났다. 이제 buildPointSummary 하나만 고치면 된다.
 //
 // 규칙
-//   문제 하나당 딱 한 번만 포인트를 준다. 가장 먼저 채점된 기록을 쓴다.
-//   (예전에는 같은 문제를 다시 풀 때마다 또 들어가서, 한 문제를 반복해 누르면
-//    포인트가 계속 불어났다)
+//   같은 문제는 하루에 한 번만 포인트를 준다. 날이 바뀌면 다시 받을 수 있다.
+//   반복 학습은 인정하되, 한 문제를 연달아 눌러 포인트를 불리는 것은 막는 규칙이다.
+//   (망각곡선 복습도 하루 뒤부터 시작하므로 주기와도 맞는다)
+//   그날 여러 번 풀었으면 '가장 좋은 결과'를 쓴다. 틀렸다가 맞힌 날은 맞힌 것으로 친다.
+//   첫 기록만 남기면 틀렸다 맞힌 날이 10P가 되어, 고쳐 푼 아이가 손해를 본다.
 //   맞음 20P / 틀림 10P. 체크리스트로 체크한 것은 5P / 3P이고 하루 200P까지.
 //   플래너 달성과 사용(차감)은 포인트기록 시트에 적힌 그대로 더한다.
 // ---------------------------------------------------------------------------
@@ -275,13 +277,16 @@ function savePlannerForUser(ss, userName, planner) {
 function buildPointSummary(ss, userName) {
   var solve = { correct: 0, wrong: 0, points: 0 };
   var check = { correct: 0, wrong: 0, points: 0, capped: 0 };
-  var repeats = 0;
+  var repeats = 0;    // 다른 날 다시 푼 기록 (포인트 받음)
+  var sameDay = 0;    // 같은 날 다시 푼 기록 (포인트 없음)
+  var seenAnyDay = {};
 
   var studySheet = ss.getSheetByName(STUDY_LOG_SHEET_NAME);
   if (studySheet) {
     var studyData = studySheet.getDataRange().getValues();
-    var seen = {};                 // 이미 포인트를 준 (사용자, 문제코드)
-    var checklistByDate = {};      // 체크리스트는 날짜별 상한이 있어 따로 모은다
+    // 1단계: (사용자, 문제, 날짜)마다 그날 가장 좋은 결과 하나만 남긴다.
+    var best = {};   // 열쇠 → { answer, source, day, user, code }
+    var order = [];  // 시트에 나온 순서를 지켜 정산표가 매번 같게 나오도록
     for (var i = 1; i < studyData.length; i++) {
       var user = String(studyData[i][5] || '').trim();
       if (userName && user !== userName) continue;
@@ -289,18 +294,39 @@ function buildPointSummary(ss, userName) {
       if (answer !== 'O' && answer !== 'X') continue;
 
       var code = String(studyData[i][1] || '').trim();
-      var key = user + '|' + code;
-      if (code && seen[key]) { repeats++; continue; }
-      if (code) seen[key] = true;
+      var day = formatDateKey(studyData[i][0]) || 'unknown';
+      var source = String(studyData[i][7] || '').trim();
+      // 코드가 비어 있으면 묶을 방법이 없으니 한 건씩 따로 센다.
+      var key = code
+        ? user + '|' + code + '|' + day
+        : user + '|행' + i + '|' + day;
 
-      if (String(studyData[i][7] || '').trim() === CHECKLIST_SOURCE) {
-        var dateKey = formatDateKey(studyData[i][0]) || 'unknown';
-        checklistByDate[dateKey] = (checklistByDate[dateKey] || 0) +
-          (answer === 'O' ? CHECKLIST_POINTS_CORRECT : CHECKLIST_POINTS_WRONG);
-        if (answer === 'O') check.correct++; else check.wrong++;
+      if (!best[key]) {
+        best[key] = { answer: answer, source: source, day: day, user: user, code: code };
+        order.push(key);
       } else {
-        if (answer === 'O') solve.correct++; else solve.wrong++;
-        solve.points += pointsForAnswer(answer);
+        sameDay++;
+        // 그날 한 번이라도 맞혔으면 맞힌 것으로 올려 준다.
+        if (answer === 'O') best[key].answer = 'O';
+      }
+    }
+
+    // 2단계: 남은 것만 포인트로 셈한다.
+    var checklistByDate = {};
+    for (var k = 0; k < order.length; k++) {
+      var item = best[order[k]];
+      if (item.code) {
+        var anyKey = item.user + '|' + item.code;
+        if (seenAnyDay[anyKey]) repeats++;   // 다른 날 다시 푼 것 (포인트 받음)
+        seenAnyDay[anyKey] = true;
+      }
+      if (item.source === CHECKLIST_SOURCE) {
+        checklistByDate[item.day] = (checklistByDate[item.day] || 0) +
+          (item.answer === 'O' ? CHECKLIST_POINTS_CORRECT : CHECKLIST_POINTS_WRONG);
+        if (item.answer === 'O') check.correct++; else check.wrong++;
+      } else {
+        if (item.answer === 'O') solve.correct++; else solve.wrong++;
+        solve.points += pointsForAnswer(item.answer);
       }
     }
     for (var dk in checklistByDate) {
@@ -335,7 +361,8 @@ function buildPointSummary(ss, userName) {
     checklist: check,
     planner: planner,
     spent: spent,
-    repeatsIgnored: repeats,
+    repeatsRewarded: repeats,
+    sameDaySkipped: sameDay,
     earned: earned,
     balance: earned + spent.points,
     logs: logs
@@ -405,8 +432,10 @@ function writePointSummarySheet(ss) {
     rows.push([name, '번 포인트 합계', '', '', s.earned, '']);
     rows.push([name, '쓴 포인트', s.spent.count, '', s.spent.points, '집 업그레이드·보상 교환']);
     rows.push([name, '남은 포인트', '', '', s.balance, '']);
-    rows.push([name, '다시 푼 기록 (포인트 없음)', s.repeatsIgnored, '', 0,
-      '같은 문제는 처음 채점한 것만 포인트를 준다']);
+    rows.push([name, '이 중 다른 날 다시 푼 기록', s.repeatsRewarded, '', '',
+      '날이 바뀌면 같은 문제도 다시 포인트를 준다 (위 합계에 이미 들어 있음)']);
+    rows.push([name, '같은 날 다시 푼 기록 (포인트 없음)', s.sameDaySkipped, '', 0,
+      '한 문제는 하루에 한 번만 인정한다']);
     rows.push(['', '', '', '', '', '']);
   }
 
