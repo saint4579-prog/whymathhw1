@@ -24,7 +24,12 @@ import { toISODate } from '@/lib/dateUtils';
 import { getPointsForAnswer } from '@/lib/points';
 import { getCollectionState } from '@/lib/levels';
 import { CHARACTERS } from '@/lib/characters';
-import { VILLAGE_ICON, clampLevel, MAX_HOUSE_LEVEL } from '@/lib/villageAssets';
+import {
+  VILLAGE_ICON,
+  clampLevel,
+  MAX_HOUSE_LEVEL,
+  houseLevelFromPointLogs,
+} from '@/lib/villageAssets';
 import { sortProblemsByPage, isSolved } from '@/lib/problemUtils';
 import { recordAttempt, clearLegacyScheduleKey } from '@/lib/reviewSchedule';
 
@@ -375,7 +380,10 @@ export default function Home() {
     };
   }, [userInfo]);
 
-  // 저장해 둔 집 단계를 불러온다. (플래너 블롭 → 없으면 이 기기 기록)
+  // 저장해 둔 집 단계를 불러온다. (화면을 바로 채우기 위한 임시값)
+  //
+  // 진짜 근거는 아래 '포인트 기록으로 집 단계 맞추기'다.
+  // 여기서 읽는 값은 시트 응답이 오기 전 잠깐 보여 주는 용도일 뿐이다.
   useEffect(() => {
     if (!userInfo) return undefined;
     let cancelled = false;
@@ -395,6 +403,27 @@ export default function Home() {
       cancelled = true;
     };
   }, [userInfo]);
+
+  // 포인트 기록으로 집 단계를 맞춘다.
+  //
+  // 집을 올릴 때마다 '멍멍 마을 집 4단계' 내역이 포인트기록 시트에 남는다.
+  // 그게 아이가 실제로 포인트를 낸 증거라서, 브라우저나 플래너에 적힌 값보다 믿을 만하다.
+  // (기기를 바꾸거나 예전 저장값이 남아 있으면 엉뚱한 단계가 보일 수 있다)
+  useEffect(() => {
+    if (!userInfo || pointLogs.length === 0) return;
+    const owned = houseLevelFromPointLogs(pointLogs);
+    setHouseLevel((prev) => {
+      if (prev === owned) return prev;
+      // 어긋난 값을 이 기기에도 바로잡아 둔다.
+      try {
+        window.localStorage.setItem(userKey(HOUSE_LEVEL_BASE, userInfo?.name), String(owned));
+      } catch {
+        // 저장 실패는 화면에 영향이 없다.
+      }
+      patchPlanner(userInfo?.name, { houseLevel: owned }).catch(() => {});
+      return owned;
+    });
+  }, [userInfo, pointLogs]);
 
   // 시험 목록(배열)을 불러온다.
   // 1) 즉시 localStorage 캐시로 화면을 채우고, 2) GAS(플래너 블롭)에서 최신값을 받아 덮어쓴다.

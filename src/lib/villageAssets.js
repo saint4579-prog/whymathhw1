@@ -118,3 +118,28 @@ export const HOUSE_NAMES = [
 export function houseName(level) {
   return HOUSE_NAMES[clampLevel(level) - 1];
 }
+
+/**
+ * 포인트 기록에서 집 단계를 되짚어 낸다.
+ *
+ * 집을 올릴 때마다 '멍멍 마을 집 4단계' 같은 내역이 포인트기록 시트에 남는다.
+ * 이게 아이가 실제로 포인트를 낸 증거이므로, 집 단계의 진짜 근거로 삼는다.
+ *
+ * 브라우저에 남은 값이나 플래너에 적힌 값은 어긋날 수 있다.
+ * (기기를 바꾸거나, 예전에 이름 없이 저장하던 값이 남아 있거나, 시험 삼아 바꿨거나)
+ * 하지만 포인트를 낸 기록은 지우지 않는 한 그대로다.
+ *
+ * 산 적이 없으면 1단계. (1단계는 처음부터 주어지므로 기록이 없다)
+ */
+export function houseLevelFromPointLogs(pointLogs = []) {
+  let level = MIN_HOUSE_LEVEL;
+  (Array.isArray(pointLogs) ? pointLogs : []).forEach((log) => {
+    const matched = String(log?.item ?? '').match(/멍멍\s*마을\s*집\s*(\d+)\s*단계/);
+    if (!matched) return;
+    // 포인트가 빠져나간 기록만 인정한다. 환불이나 잘못 적힌 줄까지 세면 실제보다 높아진다.
+    if (Number(log?.amount) > 0) return;
+    const n = clampLevel(matched[1]);
+    if (n > level) level = n;
+  });
+  return level;
+}
