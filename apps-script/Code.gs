@@ -664,13 +664,18 @@ function doGetQuotes(ss) {
   if (!sheet) return { status: 'success', quotes: [] };
 
   var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { status: 'success', quotes: [] };
+  if (lastRow < 1) return { status: 'success', quotes: [] };
 
-  var values = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
+  // 1행부터 읽는다. 이 탭은 머리글이 있을 수도, 첫 줄부터 바로 명언일 수도 있어서
+  // 무조건 2행부터 읽으면 명언 하나를 잃는다. 머리글처럼 보이는 첫 줄만 건너뛴다.
+  var values = sheet.getRange(1, 2, lastRow, 1).getValues();
+  var HEADERS = ['명언', '명대사', '공부명언', '공부명대사', '문구', '내용', '글귀'];
   var out = [];
   for (var i = 0; i < values.length; i++) {
     var line = String(values[i][0] || '').trim();
-    if (line) out.push(line);
+    if (!line) continue;
+    if (i === 0 && HEADERS.indexOf(line) !== -1) continue;
+    out.push(line);
   }
   return { status: 'success', quotes: out };
 }

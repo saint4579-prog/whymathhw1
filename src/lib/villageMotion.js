@@ -350,3 +350,96 @@ export function pickCast(names = [], houseLevel = 1, random = Math.random) {
   const roster = shuffle(unique, random);
   return { roster, cast: roster.slice(0, Math.min(limit, roster.length)) };
 }
+
+// ---------------------------------------------------------------------------
+// 호감도에 따른 거리두기
+// ---------------------------------------------------------------------------
+
+/** 친한 동물이 지윤이 옆에 서는 거리. 너무 붙으면 그림이 겹친다. */
+export const FOLLOW_DISTANCE = 0.13;
+/** 이 거리보다 멀어지면 친한 동물이 다시 다가온다. */
+export const FOLLOW_TRIGGER = 0.2;
+/** 서먹한 동물이 지윤이를 피하기 시작하는 거리. */
+export const AVOID_TRIGGER = 0.28;
+
+/** 주어진 자리 근처에서 걸어갈 수 있는 점 하나. 못 찾으면 아무 데나. */
+export function pointNear(x, y, radius, kind = 'land', random = Math.random) {
+  for (let i = 0; i < 24; i += 1) {
+    const angle = random() * Math.PI * 2;
+    const r = radius * (0.45 + 0.55 * random());
+    const nx = clamp(x + Math.cos(angle) * r, 0.02, 0.98);
+    const ny = clamp(y + Math.sin(angle) * r, 0.02, 0.98);
+    if (isWalkable(nx, ny, kind)) return { x: nx, y: ny };
+  }
+  return randomWalkablePoint(kind, random);
+}
+
+/** 어떤 지점에서 멀어지는 쪽으로 갈 수 있는 점 하나. */
+export function pointAwayFrom(actor, fromX, fromY, random = Math.random) {
+  const kind = actor.kind ?? 'land';
+  const dx = actor.x - fromX;
+  const dy = actor.y - fromY;
+  const len = Math.hypot(dx, dy) || 1;
+  // 반대 방향을 중심으로 부채꼴로 흩어 본다. 정확히 반대쪽이 물이나 집일 수 있어서다.
+  for (let spread = 0; spread <= 1.2; spread += 0.3) {
+    for (let side = -1; side <= 1; side += 2) {
+      const angle = Math.atan2(dy, dx) + side * spread;
+      // 섬 가장자리에 몰린 동물은 크게 물러설 자리가 없다.
+      // 큰 걸음만 시도하면 갈 곳을 못 찾아 제자리에 굳어 버리므로,
+      // 작은 걸음까지 내려가며 조금씩이라도 물러설 자리를 찾는다.
+      for (let dist = 0.34; dist >= 0.05; dist -= 0.04) {
+        const nx = clamp(actor.x + Math.cos(angle) * dist, 0.02, 0.98);
+        const ny = clamp(actor.y + Math.sin(angle) * dist, 0.02, 0.98);
+        if (isWalkable(nx, ny, kind) && Math.hypot(nx - fromX, ny - fromY) > len) {
+          return { x: nx, y: ny };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * 호감도에 따라 지윤이와의 거리를 조절한다.
+ *
+ *   우호적 → 곁으로 다가와 머문다
+ *   까칠함 → 가까이 오면 슬금슬금 멀어진다
+ *   보통   → 신경 쓰지 않고 제 갈 길을 간다
+ *
+ * 아이가 직접 눌러서 보낸 동물(commanded)은 건드리지 않는다.
+ * 시킨 대로 안 가면 조작이 고장 난 것처럼 느껴진다.
+ *
+ * @param tier 'friendly' | 'neutral' | 'hostile'
+ * @returns 새 목적지가 필요하면 바뀐 actor, 아니면 원본 그대로
+ */
+export function applySocialDistance(actor, npc, tier, random = Math.random) {
+  if (!actor || !npc || actor.npc) return actor;
+  if (actor.hidden || npc.hidden || actor.commanded) return actor;
+
+  const kind = actor.kind ?? 'land';
+  const gap = Math.hypot(actor.x - npc.x, actor.y - npc.y);
+
+  if (tier === 'friendly') {
+    // 멀리 있으면 다가온다.
+    if (gap > FOLLOW_TRIGGER) {
+      const spot = pointNear(npc.x, npc.y, FOLLOW_DISTANCE, kind, random);
+      return { ...actor, target: spot, restUntil: 0, following: true };
+    }
+    // 곁에 왔더라도, 쉬다가 고른 다음 목적지가 엉뚱하게 멀면 다시 근처로 잡아 준다.
+    // 이게 없으면 다가왔다가 훌쩍 떠나 버려서 '따라다닌다'는 느낌이 나지 않는다.
+    const targetGap = Math.hypot(actor.target.x - npc.x, actor.target.y - npc.y);
+    if (targetGap > FOLLOW_TRIGGER) {
+      const spot = pointNear(npc.x, npc.y, FOLLOW_DISTANCE, kind, random);
+      return { ...actor, target: spot, following: true };
+    }
+    return actor.following ? actor : { ...actor, following: true };
+  }
+
+  if (tier === 'hostile' && gap < AVOID_TRIGGER) {
+    const spot = pointAwayFrom(actor, npc.x, npc.y, random);
+    // 물속 동물은 연못에 갇혀 있어 도망칠 데가 없을 수 있다. 그때는 그냥 둔다.
+    if (spot) return { ...actor, target: spot, restUntil: 0, following: false };
+  }
+
+  return actor.following ? { ...actor, following: false } : actor;
+}

@@ -37,6 +37,7 @@ import {
   isAquatic,
   sendHome,
   comeOutside,
+  applySocialDistance,
   HOUSE_DOOR,
 } from '@/lib/villageMotion';
 import { mbtiOf, MBTI_TYPES, pickLine, pickGreeting } from '@/lib/villagePersona';
@@ -125,6 +126,9 @@ export default function Village({
   // 시트에서 받아 온 국어 어휘와 공부 명언
   const [vocab, setVocab] = useState([]);
   const [quotes, setQuotes] = useState([]);
+  // 애니메이션 루프 안에서는 state를 그대로 읽으면 옛날 값이 잡힌다. ref로 함께 들고 있는다.
+  const quotesRef = useRef([]);
+  const affinityRef = useRef({});
   // 방금 퀴즈를 낸 동물 → 다시 낼 수 있는 시각.
   // 5분 대화 쿨타임과는 아무 상관이 없다. 같은 동물을 연타했을 때
   // 문제가 줄줄이 뜨는 것만 막는 짧은 간격이다.
@@ -161,6 +165,11 @@ export default function Village({
   const restingCount = Math.max(0, available.length - cast.length);
   const spriteOf = useCallback((name) => Object.values(CHARACTERS).find((c) => c.label === name) ?? null, []);
 
+  // 호감도가 바뀌면 루프가 볼 수 있게 ref에도 옮겨 둔다.
+  useEffect(() => {
+    affinityRef.current = affinity;
+  }, [affinity]);
+
   // 저장된 호감도와 쿨타임 불러오기
   useEffect(() => {
     setAffinity(loadAffinity(userName));
@@ -175,7 +184,10 @@ export default function Village({
       if (alive) setVocab(normalizeVocab(rows));
     });
     fetchQuotes().then((list) => {
-      if (alive) setQuotes(Array.isArray(list) ? list.filter(Boolean) : []);
+      if (!alive) return;
+      const clean = Array.isArray(list) ? list.filter(Boolean) : [];
+      quotesRef.current = clean;
+      setQuotes(clean);
     });
     return () => {
       alive = false;
@@ -222,6 +234,24 @@ export default function Village({
 
       let next = actorsRef.current.map((actor) => stepCharacter(actor, dt, now));
 
+      // 돌아다니다가 혼자 명언을 읊는다.
+      // 예전에는 눌렀을 때만 나와서 거의 볼 일이 없었다.
+      if (quotesRef.current.length > 0 && Math.random() < 0.0035) {
+        const idle = next
+          .map((a, i) => ({ a, i }))
+          .filter(({ a }) => !a.npc && !a.hidden && !a.line);
+        if (idle.length > 0) {
+          const { a, i } = idle[Math.floor(Math.random() * idle.length)];
+          const pool = quotesRef.current;
+          const line = quoteLineFor(a.name, pool[Math.floor(Math.random() * pool.length)]);
+          if (line) {
+            next = next.map((actor, index) =>
+              index === i ? { ...actor, line, lineUntil: now + BUBBLE_MS + 1500 } : actor
+            );
+          }
+        }
+      }
+
       if (Math.random() < 0.004) {
         const pair = findNearbyPair(next, 0.07, now);
         if (pair) {
@@ -245,6 +275,32 @@ export default function Village({
       lastTimeRef.current = 0;
     };
   }, [cast, npcs]);
+
+  // 호감도에 따라 지윤이와의 거리를 조절한다.
+  //
+  // 매 프레임 다시 계산하면 목적지가 계속 바뀌어 제자리에서 떠는 것처럼 보인다.
+  // 1.5초에 한 번만 손보면 '슬금슬금' 다가오거나 멀어지는 느낌이 난다.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const list = actorsRef.current;
+      const jiyoon = list.find((a) => a.npc && !a.hidden);
+      if (!jiyoon) return;
+
+      let changed = false;
+      const next = list.map((actor) => {
+        const tier = affinityTier(affinityRef.current[actor.name] ?? 0);
+        if (tier === 'neutral' && !actor.following) return actor;
+        const moved = applySocialDistance(actor, jiyoon, tier);
+        if (moved !== actor) changed = true;
+        return moved;
+      });
+      if (changed) {
+        actorsRef.current = next;
+        setActors(next);
+      }
+    }, 1500);
+    return () => clearInterval(timer);
+  }, []);
 
   // 쿨타임이 끝나면 지윤이가 집에서 나오고, 말 걸 친구도 새로 정해진다.
   useEffect(() => {
