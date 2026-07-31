@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { isSolved } from '@/lib/problemUtils';
+import { isSolved, solvedToday } from '@/lib/problemUtils';
 import ProblemDetailModal from './ProblemDetailModal';
 import ProblemHistoryModal from './ProblemHistoryModal';
 import CharacterMascot from './CharacterMascot';
@@ -133,16 +133,27 @@ export default function ProblemListTable({
                 />
               </td>
               <td className="px-4 py-2">
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onSolve(p.rowNumber);
-                  }}
-                  className="rounded-full bg-rose-400 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-rose-500"
-                >
-                  출발! 🐾
-                </button>
+                {/* 오늘 이미 푼 문제는 내일까지 잠근다.
+                    같은 문제를 연달아 풀어 포인트를 불리는 걸 막고, 복습 주기와도 맞춘다. */}
+                {solvedToday(p) ? (
+                  <span
+                    title="오늘 푼 문제예요. 내일 다시 풀 수 있어요"
+                    className="inline-block cursor-not-allowed rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-bold text-emerald-700"
+                  >
+                    오늘 완료 · 내일 다시
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSolve(p.rowNumber);
+                    }}
+                    className="rounded-full bg-rose-400 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-rose-500"
+                  >
+                    출발! 🐾
+                  </button>
+                )}
               </td>
             </tr>
           ))}

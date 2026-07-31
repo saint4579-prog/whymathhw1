@@ -1,5 +1,7 @@
 'use client';
 
+import { solvedToday } from '@/lib/problemUtils';
+
 function StatusBadge({ isCorrect }) {
   if (isCorrect === 'O') {
     return (
@@ -120,13 +122,23 @@ export default function HwangsoListTable({
                 <StatusBadge isCorrect={p.isCorrect} />
               </td>
               <td className="px-4 py-2">
-                <button
-                  type="button"
-                  onClick={() => onSolve(p.rowNumber)}
-                  className="rounded-full bg-rose-400 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-rose-500"
-                >
-                  출발! 🐾
-                </button>
+                {/* 오늘 푼 문제는 내일까지 잠근다. */}
+                {solvedToday(p) ? (
+                  <span
+                    title="오늘 푼 문제예요. 내일 다시 풀 수 있어요"
+                    className="inline-block cursor-not-allowed rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-bold text-emerald-700"
+                  >
+                    오늘 완료 · 내일 다시
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onSolve(p.rowNumber)}
+                    className="rounded-full bg-rose-400 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-rose-500"
+                  >
+                    출발! 🐾
+                  </button>
+                )}
               </td>
             </tr>
           ))}

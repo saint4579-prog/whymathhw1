@@ -30,7 +30,7 @@ import {
   MAX_HOUSE_LEVEL,
   houseLevelFromPointLogs,
 } from '@/lib/villageAssets';
-import { sortProblemsByPage, isSolved } from '@/lib/problemUtils';
+import { sortProblemsByPage, isSolved, solvedToday } from '@/lib/problemUtils';
 import { recordAttempt, clearLegacyScheduleKey } from '@/lib/reviewSchedule';
 
 const POINT_HISTORY_KEY = 'dog-math-point-history';
@@ -482,8 +482,14 @@ export default function Home() {
   };
 
   const startSolving = (list, rowNumber, label, workbook = 'yi') => {
-    const startIndex = rowNumber == null ? 0 : Math.max(list.findIndex((p) => p.rowNumber === rowNumber), 0);
-    setSolverQueue(list);
+    // 오늘 이미 푼 문제는 줄에서 빼고 시작한다.
+    // 목록의 배지만 잠그면, 여러 문제를 묶어 푸는 '오늘의 목표' 경로로 들어올 때
+    // 오늘 푼 문제가 다시 나온다. 화면이 낡았을 때도 여기서 걸러진다.
+    const playable = list.filter((p) => !solvedToday(p) || p.rowNumber === rowNumber);
+    const queue = playable.length > 0 ? playable : list;
+    const startIndex =
+      rowNumber == null ? 0 : Math.max(queue.findIndex((p) => p.rowNumber === rowNumber), 0);
+    setSolverQueue(queue);
     setSolverIndex(startIndex);
     setSolverLabel(label);
     setSolverWorkbook(workbook);

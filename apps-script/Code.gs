@@ -25,6 +25,12 @@ var CHECKLIST_POINTS_WRONG = 3;
 var CHECKLIST_DAILY_CAP = 200;
 // 학습기록 H열(출처)에 남기는 표식. 이 값이 있는 행은 체크리스트에서 온 것이다.
 var CHECKLIST_SOURCE = '체크리스트';
+
+// '한 문제는 하루에 한 번' 규칙을 적용하기 시작하는 날.
+// 이 날짜보다 앞선 기록은 예전 방식(풀 때마다 적립) 그대로 둔다.
+// 이미 모아 둔 포인트를 나중에 깎으면 아이 입장에서는 이유 없이 줄어든 것이라
+// 규칙을 바꾼 시점부터만 새 방식으로 센다.
+var DAILY_ONCE_START_DATE = '2026-08-01';
 var PROBLEM_IMAGE_FOLDER_ID = '1QPpZq4iDvnVVaswFQd6YLgY2d4IEGbqG';
 var ANSWER_IMAGE_FOLDER_ID = '1YOtQiOrjbxDh3DNwgdwkA65C9bkbdhDr';
 var TIME_ZONE = 'Asia/Seoul';
@@ -270,6 +276,8 @@ function savePlannerForUser(ss, userName, planner) {
 //   (망각곡선 복습도 하루 뒤부터 시작하므로 주기와도 맞는다)
 //   그날 여러 번 풀었으면 '가장 좋은 결과'를 쓴다. 틀렸다가 맞힌 날은 맞힌 것으로 친다.
 //   첫 기록만 남기면 틀렸다 맞힌 날이 10P가 되어, 고쳐 푼 아이가 손해를 본다.
+//   단, DAILY_ONCE_START_DATE 이전 기록은 예전 방식대로 풀 때마다 인정한다.
+//   지금까지 모은 포인트가 규칙 변경으로 줄어들지 않게 하기 위해서다.
 //   맞음 20P / 틀림 10P. 체크리스트로 체크한 것은 5P / 3P이고 하루 200P까지.
 //   플래너 달성과 사용(차감)은 포인트기록 시트에 적힌 그대로 더한다.
 // ---------------------------------------------------------------------------
@@ -297,9 +305,11 @@ function buildPointSummary(ss, userName) {
       var day = formatDateKey(studyData[i][0]) || 'unknown';
       var source = String(studyData[i][7] || '').trim();
       // 코드가 비어 있으면 묶을 방법이 없으니 한 건씩 따로 센다.
-      var key = code
-        ? user + '|' + code + '|' + day
-        : user + '|행' + i + '|' + day;
+      // 규칙 시행 전 기록은 묶지 않는다. 줄마다 따로 세어 예전 포인트를 그대로 둔다.
+      var underOldRule = day < DAILY_ONCE_START_DATE;
+      var key = underOldRule || !code
+        ? user + '|행' + i + '|' + day
+        : user + '|' + code + '|' + day;
 
       if (!best[key]) {
         best[key] = { answer: answer, source: source, day: day, user: user, code: code };
