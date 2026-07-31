@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { toISODate } from '@/lib/dateUtils';
 import CharacterMascot from './CharacterMascot';
+import PointSummaryPanel from './PointSummaryPanel';
 
 const DEFAULT_PARENT_PIN = '1234';
 
@@ -156,7 +157,13 @@ function ParentRewardModal({ currentPoints, onClose, onRedeem }) {
   );
 }
 
-export default function RewardStore({ currentPoints = 0, dailyStats = {}, pointLogs = [], onRedeem }) {
+export default function RewardStore({
+  currentPoints = 0,
+  dailyStats = {},
+  pointLogs = [],
+  onRedeem,
+  userName,
+}) {
   const [isParentModalOpen, setIsParentModalOpen] = useState(false);
 
   // 그동안 모은 포인트: dailyStats(날짜별 학습 통계)의 pointsEarned를 모두 합산한다.
@@ -167,12 +174,16 @@ export default function RewardStore({ currentPoints = 0, dailyStats = {}, pointL
   );
 
   // 선물에 사용한 포인트: pointLogs(엄마가 차감한 내역)의 절대값 합.
+  // 선물에 사용한 포인트: 포인트기록 중 '빠져나간' 것만 센다.
+  //
+  // 예전에는 모든 줄에 Math.abs를 씌워 더했다. 그런데 포인트기록에는
+  // 플래너 달성처럼 '들어온' 줄도 함께 있어서, 번 포인트까지 쓴 것으로 세어졌다.
   const totalUsed = useMemo(
     () =>
-      pointLogs.reduce(
-        (sum, entry) => sum + Math.abs(Number(entry.amount ?? entry.points ?? 0) || 0),
-        0
-      ),
+      pointLogs.reduce((sum, entry) => {
+        const amount = Number(entry.amount ?? entry.points ?? 0) || 0;
+        return amount < 0 ? sum + Math.abs(amount) : sum;
+      }, 0),
     [pointLogs]
   );
 
@@ -188,13 +199,18 @@ export default function RewardStore({ currentPoints = 0, dailyStats = {}, pointL
         amount: Number(stat?.pointsEarned) || 0,
       }));
 
+    // 포인트기록에는 쓴 것(음수)과 번 것(플래너 달성 등, 양수)이 함께 들어 있다.
+    // 예전에는 전부 -Math.abs로 뒤집어서, 100P를 벌어도 화면에는 -100P로 보였다.
+    // 아이가 "번 포인트가 어디 갔지?" 하게 만든 원인이다.
     const redeemedEntries = pointLogs.map((entry, index) => {
       const rawDate = entry.date ?? entry.createdAt ?? entry.timestamp ?? entry.redeemedAt;
+      const amount = Number(entry.amount ?? entry.points ?? 0) || 0;
+      const name = entry.item ?? entry.description ?? (amount < 0 ? '보상 사용' : '포인트 적립');
       return {
-        key: entry.id ?? `redeem-${index}-${rawDate ?? index}`,
+        key: entry.id ?? `log-${index}-${rawDate ?? index}`,
         date: toISODate(rawDate) ?? String(rawDate ?? '').slice(0, 10),
-        label: `🎁 ${entry.item ?? entry.description ?? '보상 사용'}`,
-        amount: -Math.abs(Number(entry.amount ?? entry.points ?? 0) || 0),
+        label: `${amount < 0 ? '🎁' : '⭐'} ${name}`,
+        amount,
       };
     });
 
@@ -205,6 +221,7 @@ export default function RewardStore({ currentPoints = 0, dailyStats = {}, pointL
 
   return (
     <div className="mx-auto max-w-6xl">
+      <PointSummaryPanel userName={userName} />
       <div className="mb-5 overflow-hidden rounded-[2rem] border-4 border-white bg-gradient-to-r from-amber-200 via-yellow-100 to-rose-100 p-6 shadow-xl shadow-amber-100">
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-1">

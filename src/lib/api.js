@@ -362,3 +362,22 @@ export async function saveVocabResult(userName, rowNumber, correct) {
     return { correctCount: 0 };
   }
 }
+
+/**
+ * 포인트가 어떻게 나온 숫자인지 항목별로 받아 온다.
+ * 실패하면 null — 화면에서는 정산 부분만 감추고 나머지는 그대로 보인다.
+ */
+export async function fetchPointSummary(userName) {
+  const name = userName ?? getStoredUserName();
+  try {
+    const res = await fetch(
+      `${API_URL}?type=GET_POINT_SUMMARY&userName=${encodeURIComponent(name || '')}`,
+      { cache: 'no-store' }
+    );
+    const data = await parseApiResponse(res, '포인트 정산을 불러오지 못했습니다.');
+    const root = data?.data && !Array.isArray(data.data) ? data.data : data;
+    return root?.summary ?? null;
+  } catch {
+    return null;
+  }
+}

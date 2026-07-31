@@ -9,6 +9,8 @@ var PLANNER_SHEET_NAME = '플래너';
 var PLANNER_DAY_SHEET_NAME = '플래너일자';
 // 종이 학습 체크리스트. 한 행 = 사용자 1명의 문항 1개.
 var CHECKLIST_SHEET_NAME = '체크리스트';
+// 포인트가 어떻게 계산됐는지 사람이 눈으로 검사하는 탭
+var POINT_SUMMARY_SHEET_NAME = '포인트정산';
 // 마을 동물이 내는 국어 어휘 퀴즈와, 돌아다니며 말하는 공부 명언
 var VOCAB_SHEET_NAME = '필수 국어 어휘';
 var QUOTE_SHEET_NAME = '공부명대사';
@@ -255,48 +257,181 @@ function savePlannerForUser(ss, userName, planner) {
   sheet.appendRow([name, json, now]);
 }
 
-function getCurrentPoints(ss, userName) {
-  var points = 0;
+// ---------------------------------------------------------------------------
+// 포인트 정산
+//
+// 잔액이 어떻게 나온 숫자인지 한 곳에서만 계산한다.
+// 예전에는 화면에 쓰는 계산과 잔액 계산이 따로 있어서, 규칙을 하나 고치면
+// 다른 쪽이 어긋났다. 이제 buildPointSummary 하나만 고치면 된다.
+//
+// 규칙
+//   문제 하나당 딱 한 번만 포인트를 준다. 가장 먼저 채점된 기록을 쓴다.
+//   (예전에는 같은 문제를 다시 풀 때마다 또 들어가서, 한 문제를 반복해 누르면
+//    포인트가 계속 불어났다)
+//   맞음 20P / 틀림 10P. 체크리스트로 체크한 것은 5P / 3P이고 하루 200P까지.
+//   플래너 달성과 사용(차감)은 포인트기록 시트에 적힌 그대로 더한다.
+// ---------------------------------------------------------------------------
+
+function buildPointSummary(ss, userName) {
+  var solve = { correct: 0, wrong: 0, points: 0 };
+  var check = { correct: 0, wrong: 0, points: 0, capped: 0 };
+  var repeats = 0;
+
   var studySheet = ss.getSheetByName(STUDY_LOG_SHEET_NAME);
   if (studySheet) {
     var studyData = studySheet.getDataRange().getValues();
-    // 체크리스트에서 온 기록은 요율이 다르고(5P/3P) 하루 상한이 있으므로 날짜별로 따로 모은다.
-    // 직접 풀고 채점한 기록은 예전처럼 그때그때 더한다.
-    var checklistByDate = {};
+    var seen = {};                 // 이미 포인트를 준 (사용자, 문제코드)
+    var checklistByDate = {};      // 체크리스트는 날짜별 상한이 있어 따로 모은다
     for (var i = 1; i < studyData.length; i++) {
-      var studyUser = String(studyData[i][5] || '').trim();
-      if (userName && studyUser !== userName) continue;
+      var user = String(studyData[i][5] || '').trim();
+      if (userName && user !== userName) continue;
       var answer = studyData[i][2];
       if (answer !== 'O' && answer !== 'X') continue;
+
+      var code = String(studyData[i][1] || '').trim();
+      var key = user + '|' + code;
+      if (code && seen[key]) { repeats++; continue; }
+      if (code) seen[key] = true;
 
       if (String(studyData[i][7] || '').trim() === CHECKLIST_SOURCE) {
         var dateKey = formatDateKey(studyData[i][0]) || 'unknown';
         checklistByDate[dateKey] = (checklistByDate[dateKey] || 0) +
           (answer === 'O' ? CHECKLIST_POINTS_CORRECT : CHECKLIST_POINTS_WRONG);
+        if (answer === 'O') check.correct++; else check.wrong++;
       } else {
-        points += pointsForAnswer(answer);
+        if (answer === 'O') solve.correct++; else solve.wrong++;
+        solve.points += pointsForAnswer(answer);
       }
     }
-    // 날짜별로 상한을 씌운 뒤 더한다.
-    // 이렇게 해야 584문항을 하루에 다 체크해도 그날 받는 건 200P를 넘지 않는다.
     for (var dk in checklistByDate) {
       if (!Object.prototype.hasOwnProperty.call(checklistByDate, dk)) continue;
-      points += Math.min(checklistByDate[dk], CHECKLIST_DAILY_CAP);
+      var raw = checklistByDate[dk];
+      var given = Math.min(raw, CHECKLIST_DAILY_CAP);
+      check.points += given;
+      check.capped += (raw - given);   // 상한에 걸려 못 받은 양
     }
   }
 
+  var planner = { count: 0, points: 0 };
+  var spent = { count: 0, points: 0 };
+  var logs = [];
   var pointSheet = ss.getSheetByName(POINT_LOG_SHEET_NAME);
   if (pointSheet) {
     var pointData = pointSheet.getDataRange().getValues();
     for (var j = 1; j < pointData.length; j++) {
-      var pointUser = String(pointData[j][3] || '').trim();
-      if (userName && pointUser !== userName) continue;
-      points += Number(pointData[j][2]) || 0;
+      var pUser = String(pointData[j][3] || '').trim();
+      if (userName && pUser !== userName) continue;
+      var amount = Number(pointData[j][2]) || 0;
+      if (amount >= 0) { planner.count++; planner.points += amount; }
+      else { spent.count++; spent.points += amount; }
+      logs.push({ date: pointData[j][0], item: pointData[j][1], amount: amount, user: pUser });
     }
   }
-  return points;
+
+  var earned = solve.points + check.points + planner.points;
+  return {
+    user: userName || '(전체)',
+    solve: solve,
+    checklist: check,
+    planner: planner,
+    spent: spent,
+    repeatsIgnored: repeats,
+    earned: earned,
+    balance: earned + spent.points,
+    logs: logs
+  };
 }
 
+function getCurrentPoints(ss, userName) {
+  return buildPointSummary(ss, userName).balance;
+}
+
+/** 사용자정보 시트에 등록된 이름들. 없으면 학습기록에서 이름을 긁어 온다. */
+function listUserNames(ss) {
+  var names = {};
+  var userSheet = ss.getSheetByName(USER_SHEET_NAME);
+  if (userSheet) {
+    var data = userSheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      var n = String(data[i][2] || '').trim();
+      if (n) names[n] = true;
+    }
+  }
+  var studySheet = ss.getSheetByName(STUDY_LOG_SHEET_NAME);
+  if (studySheet) {
+    var sd = studySheet.getDataRange().getValues();
+    for (var j = 1; j < sd.length; j++) {
+      var m = String(sd[j][5] || '').trim();
+      if (m) names[m] = true;
+    }
+  }
+  var out = [];
+  for (var k in names) if (Object.prototype.hasOwnProperty.call(names, k)) out.push(k);
+  out.sort();
+  return out;
+}
+
+/**
+ * [포인트정산] 탭을 다시 그린다.
+ * 스프레드시트 메뉴 [멍멍 수학] → [포인트 정산 새로고침] 에서 부른다.
+ */
+function writePointSummarySheet(ss) {
+  ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = getOrCreateSheet(ss, POINT_SUMMARY_SHEET_NAME, []);
+  sheet.clear();
+
+  var rows = [];
+  rows.push(['멍멍 수학 포인트 정산', '', '', '', '', '']);
+  rows.push(['만든 시각', formatDateTime(new Date()), '', '', '', '']);
+  rows.push(['', '', '', '', '', '']);
+  rows.push(['이름', '항목', '개수', '단가', '포인트', '설명']);
+
+  var names = listUserNames(ss);
+  for (var i = 0; i < names.length; i++) {
+    var name = names[i];
+    var s = buildPointSummary(ss, name);
+    rows.push([name, '문제 풀이 (맞음)', s.solve.correct, POINTS_PER_CORRECT,
+      s.solve.correct * POINTS_PER_CORRECT, '앱에서 직접 풀고 맞은 문제']);
+    rows.push([name, '문제 풀이 (틀림)', s.solve.wrong, POINTS_PER_WRONG,
+      s.solve.wrong * POINTS_PER_WRONG, '틀려도 푼 것은 인정']);
+    rows.push([name, '체크리스트 (맞음)', s.checklist.correct, CHECKLIST_POINTS_CORRECT, '',
+      '종이로 풀고 체크한 것']);
+    rows.push([name, '체크리스트 (틀림)', s.checklist.wrong, CHECKLIST_POINTS_WRONG, '', '']);
+    rows.push([name, '체크리스트 합계 (하루 ' + CHECKLIST_DAILY_CAP + 'P 상한 적용)', '', '',
+      s.checklist.points,
+      s.checklist.capped > 0 ? ('상한에 걸려 못 받은 ' + s.checklist.capped + 'P 있음') : '']);
+    rows.push([name, '플래너 달성 등', s.planner.count, '', s.planner.points,
+      '포인트기록 시트에 적힌 적립']);
+    rows.push([name, '번 포인트 합계', '', '', s.earned, '']);
+    rows.push([name, '쓴 포인트', s.spent.count, '', s.spent.points, '집 업그레이드·보상 교환']);
+    rows.push([name, '남은 포인트', '', '', s.balance, '']);
+    rows.push([name, '다시 푼 기록 (포인트 없음)', s.repeatsIgnored, '', 0,
+      '같은 문제는 처음 채점한 것만 포인트를 준다']);
+    rows.push(['', '', '', '', '', '']);
+  }
+
+  sheet.getRange(1, 1, rows.length, 6).setValues(rows);
+  sheet.getRange(1, 1, 1, 6).merge().setFontWeight('bold').setFontSize(14);
+  sheet.getRange(4, 1, 1, 6).setFontWeight('bold').setBackground('#FDE68A');
+  sheet.setColumnWidth(1, 90);
+  sheet.setColumnWidth(2, 260);
+  sheet.setColumnWidth(6, 320);
+  return { status: 'success', users: names.length };
+}
+
+/** 스프레드시트를 열면 상단에 메뉴를 만들어 준다. */
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('멍멍 수학')
+    .addItem('포인트 정산 새로고침', 'refreshPointSummary')
+    .addToUi();
+}
+
+function refreshPointSummary() {
+  var result = writePointSummarySheet(SpreadsheetApp.getActiveSpreadsheet());
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    result.users + '명의 포인트를 정산했어요.', '멍멍 수학', 5);
+}
 
 // ---------------------------------------------------------------------------
 // 학습 체크리스트
@@ -732,6 +867,10 @@ function doGet(e) {
     // 스터디 플래너/시험 대비 설정 조회. (문제 목록 집계보다 먼저 빠르게 응답)
     if (e && e.parameter && e.parameter.type === 'GET_CHECKLIST') {
       return jsonResponse(doGetChecklist(ss, targetUser));
+    }
+
+    if (e && e.parameter && e.parameter.type === 'GET_POINT_SUMMARY') {
+      return jsonResponse({ status: 'success', summary: buildPointSummary(ss, targetUser) });
     }
 
     if (e && e.parameter && e.parameter.type === 'GET_VOCAB') {

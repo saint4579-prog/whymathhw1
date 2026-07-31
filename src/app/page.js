@@ -957,6 +957,7 @@ export default function Home() {
             dailyStats={dailyStats}
             pointLogs={pointLogs}
             onRedeem={handleRedeemPoints}
+            userName={userInfo?.name}
           />
         )}
         {!loading && !error && activeTab === 'collection' && (
